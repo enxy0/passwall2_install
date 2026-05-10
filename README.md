@@ -2,7 +2,7 @@
 
 English | [Русский](README.ru.md)
 
-Automated installation script for Passwall2 on OpenWrt routers. Supports both SourceForge feed installation for routine updates and GitHub release installation for specific versions.
+Automated installation script for Passwall2 on OpenWrt routers. Supports SourceForge feed installation for routine updates and GitHub release installation for specific versions, using either `opkg` or `apk` depending on the OpenWrt release.
 
 ## Quick install
 
@@ -15,8 +15,9 @@ cd /tmp && rm -f passwall2.sh && wget -O passwall2.sh https://raw.githubusercont
 ## Features
 
 - **Two installation modes**:
-  - **SourceForge feed** (default): uses package feeds for easier updates via `opkg`
+  - **SourceForge feed** (default): uses package feeds for easier updates through the detected package manager
   - **GitHub releases**: installs the latest or a specific release directly
+- **Package manager detection**: uses `apk` on OpenWrt 25.x builds and `opkg` on older builds
 - **Automatic architecture detection**: detects the device architecture automatically
 - **Dependency management**: installs required packages such as `dnsmasq-full`, kernel modules, `curl`, `unzip`, and `jsonfilter`
 - **Configuration backup**: backs up the existing Passwall2 configuration before installation
@@ -28,7 +29,7 @@ cd /tmp && rm -f passwall2.sh && wget -O passwall2.sh https://raw.githubusercont
 
 ### 1. SourceForge feed installation
 
-Default mode. Uses package feeds for standard installation and follow-up updates:
+Default mode. Uses SourceForge package feeds for standard installation and follow-up updates:
 
 ```sh
 ./passwall2.sh
@@ -36,7 +37,7 @@ Default mode. Uses package feeds for standard installation and follow-up updates
 
 Advantages:
 
-- Updates remain available through `opkg update` and `opkg upgrade`
+- Updates remain available through the system package manager (`apk` or `opkg`)
 - Dependency resolution stays with the package manager
 - Feed packages are signed
 
@@ -74,7 +75,7 @@ Examples:
 ## What the script does
 
 1. Checks internet connectivity, free space, and basic device information
-2. Installs required tools such as `curl`, `unzip`, and `jsonfilter`
+2. Detects `apk` or `opkg` and installs required tools such as `curl`, `unzip`, and `jsonfilter`
 3. Ensures `kmod-nft-tproxy` and `kmod-nft-socket` are installed
 4. Replaces basic `dnsmasq` with `dnsmasq-full` when needed
 5. Detects the OpenWrt architecture automatically

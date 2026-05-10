@@ -1,6 +1,7 @@
 #!/bin/sh
 
-PACKAGE_TYPE="ipk"
+PACKAGE_MANAGER=""
+PACKAGE_TYPE=""
 REPO_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases"
 BASE_DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/download"
 TEMP_DIR="/tmp/passwall2_update"
@@ -9,7 +10,7 @@ BACKUP_SUFFIX=$(date +%Y%m%d)
 MIN_SPACE_KB=20480
 
 FEED_BASE_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
-FEED_KEY_URL="${FEED_BASE_URL}/passwall.pub"
+FEED_NAMES="passwall_luci passwall_packages passwall2"
 
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
@@ -29,8 +30,133 @@ msg() {
     esac
 }
 
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+detect_package_manager() {
+    if command_exists apk; then
+        PACKAGE_MANAGER="apk"
+        PACKAGE_TYPE="apk"
+    elif command_exists opkg; then
+        PACKAGE_MANAGER="opkg"
+        PACKAGE_TYPE="ipk"
+    else
+        msg err "No supported package manager found: need apk or opkg"
+    fi
+}
+
+pkg_update() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk update ;;
+        opkg) opkg update ;;
+    esac
+}
+
+pkg_install() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk add --upgrade "$@" ;;
+        opkg) opkg install "$@" ;;
+    esac
+}
+
+pkg_install_local() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk add --allow-untrusted --force-reinstall "$1" ;;
+        opkg) opkg install "$1" --force-reinstall ;;
+    esac
+}
+
+pkg_remove() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk del "$@" ;;
+        opkg) opkg remove "$@" ;;
+    esac
+}
+
+pkg_remove_force() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk del "$@" ;;
+        opkg) opkg remove "$@" --force-depends ;;
+    esac
+}
+
+ensure_command() {
+    local path="$1"
+    local package="$2"
+
+    [ -x "$path" ] && return 0
+    msg warn "Installing $package"
+    pkg_update && pkg_install "$package" || msg err "Failed to install $package"
+}
+
+pkg_is_installed() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk info -e "$1" >/dev/null 2>&1 ;;
+        opkg) opkg list-installed | grep -q "^$1 " ;;
+    esac
+}
+
+pkg_list_installed() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk info | sort -u ;;
+        opkg) opkg list-installed | awk '{print $1}' | sort -u ;;
+    esac
+}
+
+pkg_list_upgradable() {
+    case "$PACKAGE_MANAGER" in
+        apk)
+            apk list --upgradable 2>/dev/null | awk '{print $1}' | sed 's/-[0-9][^-[:space:]]*-r[0-9].*$//' | sort -u
+            ;;
+        opkg) opkg list-upgradable | awk '{print $1}' | sort -u ;;
+    esac
+}
+
+pkg_print_architectures() {
+    case "$PACKAGE_MANAGER" in
+        apk)
+            get_architecture
+            ;;
+        opkg)
+            opkg print-architecture | awk '{print $2}' | awk '{a[NR]=$0} END {for(i=NR;i>0;i--) print a[i]}'
+            ;;
+    esac
+}
+
+get_local_package_name() {
+    local file="$1"
+
+    case "$PACKAGE_TYPE" in
+        apk) basename "$file" ".$PACKAGE_TYPE" | sed 's/-[0-9][^-[:space:]]*-r[0-9].*$//' ;;
+        ipk) basename "$file" ".$PACKAGE_TYPE" | cut -d'_' -f1 ;;
+    esac
+}
+
+get_feed_key_url() {
+    case "$PACKAGE_MANAGER" in
+        apk) echo "${FEED_BASE_URL}/apk.pub" ;;
+        opkg) echo "${FEED_BASE_URL}/ipk.pub" ;;
+    esac
+}
+
+get_feed_url() {
+    local feed="$1"
+
+    case "$PACKAGE_MANAGER" in
+        apk) echo "${FEED_BASE_URL}/releases/packages-${RELEASE_VER}/${ARCH}/${feed}/packages.adb" ;;
+        opkg) echo "${FEED_BASE_URL}/releases/packages-${RELEASE_VER}/${ARCH}/${feed}" ;;
+    esac
+}
+
 get_architecture() {
-    local arch=$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -1)
+    local arch=""
+
+    if [ "$PACKAGE_MANAGER" = "opkg" ]; then
+        arch=$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -1)
+    elif [ "$PACKAGE_MANAGER" = "apk" ]; then
+        arch=$(apk --print-arch 2>/dev/null)
+    fi
 
     if [ -z "$arch" ] && [ -r /etc/openwrt_release ]; then
         arch=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
@@ -42,29 +168,39 @@ get_architecture() {
 get_release_version() {
     if [ -r /etc/openwrt_release ]; then
         . /etc/openwrt_release
-        echo "${DISTRIB_RELEASE%.*}"
+        case "$DISTRIB_RELEASE" in
+            *.*.*) echo "${DISTRIB_RELEASE%.*}" ;;
+            *) echo "$DISTRIB_RELEASE" ;;
+        esac
     fi
 }
 
 list_feed_packages() {
-    for feed_file in /var/opkg-lists/passwall_luci /var/opkg-lists/passwall_packages /var/opkg-lists/passwall2; do
-        [ -f "$feed_file" ] || continue
-        gzip -dc "$feed_file" 2>/dev/null || cat "$feed_file" 2>/dev/null
-    done | awk '/^Package: / {print $2}' | sort -u
+    case "$PACKAGE_MANAGER" in
+        apk)
+            apk search 2>/dev/null | awk '{print $1}' | sed 's/-[0-9][^-[:space:]]*-r[0-9].*$//' | grep -E '^(luci-app-passwall2|luci-i18n-passwall2-)' | sort -u
+            ;;
+        opkg)
+            for feed_file in /var/opkg-lists/passwall_luci /var/opkg-lists/passwall_packages /var/opkg-lists/passwall2; do
+                [ -f "$feed_file" ] || continue
+                gzip -dc "$feed_file" 2>/dev/null || cat "$feed_file" 2>/dev/null
+            done | awk '/^Package: / {print $2}' | sort -u
+            ;;
+    esac
 }
 
 list_installed_packages() {
-    opkg list-installed | awk '{print $1}' | sort -u
+    pkg_list_installed
 }
 
 list_upgradable_packages() {
-    opkg list-upgradable | awk '{print $1}' | sort -u
+    pkg_list_upgradable
 }
 
-print_opkg_warnings() {
+print_pkg_warnings() {
     local log_file="$1"
 
-    if grep -qE 'resolve_conffiles:|^Collected errors:$' "$log_file"; then
+    if [ "$PACKAGE_MANAGER" = "opkg" ] && grep -qE 'resolve_conffiles:|^Collected errors:$' "$log_file"; then
         msg warn "opkg reported warnings"
         grep -E 'resolve_conffiles:|^Collected errors:$|^ \* ' "$log_file" | sed 's/^/  /'
     fi
@@ -83,6 +219,7 @@ show_help() {
     echo ""
     echo "Description:"
     echo "  Install Passwall2 from SourceForge feed (default) or GitHub releases."
+    echo "  Automatically uses apk or opkg, depending on availability."
     echo ""
     echo "Options:"
     echo "  -g, --github [VER]  Install from GitHub releases. Optional version (e.g., v2.0.1)."
@@ -124,6 +261,9 @@ done
 
 msg head "System checks"
 
+detect_package_manager
+msg ok "Package manager: ${C_BOLD}$PACKAGE_MANAGER${C_RESET}"
+
 msg info "Checking connectivity"
 if ping -c 1 -W 5 1.1.1.1 >/dev/null 2>&1; then
     msg ok "Connectivity confirmed"
@@ -131,9 +271,9 @@ else
     msg err "No internet connection"
 fi
 
-[ -x /usr/bin/unzip ] || { msg warn "Installing unzip"; opkg update && opkg install unzip; }
-[ -x /usr/bin/curl ] || { msg warn "Installing curl"; opkg update && opkg install curl; }
-[ -x /usr/bin/jsonfilter ] || { msg warn "Installing jsonfilter"; opkg update && opkg install jsonfilter; }
+ensure_command /usr/bin/unzip unzip
+ensure_command /usr/bin/curl curl
+ensure_command /usr/bin/jsonfilter jsonfilter
 
 DEVICE_MODEL=$(cat /tmp/sysinfo/model 2>/dev/null || echo "Unknown Device")
 msg info "Device: ${C_BOLD}$DEVICE_MODEL${C_RESET}"
@@ -148,13 +288,13 @@ fi
 msg head "Dependencies"
 
 msg info "Checking dnsmasq-full"
-if ! opkg list-installed | grep -q "^dnsmasq-full "; then
-    if opkg list-installed | grep -q "^dnsmasq "; then
+if ! pkg_is_installed dnsmasq-full; then
+    if pkg_is_installed dnsmasq; then
         msg info "Removing dnsmasq"
-        opkg remove dnsmasq || msg err "Failed to remove dnsmasq"
+        pkg_remove dnsmasq || msg err "Failed to remove dnsmasq"
     fi
     msg info "Installing dnsmasq-full"
-    opkg install dnsmasq-full || msg err "Failed to install dnsmasq-full"
+    pkg_install dnsmasq-full || msg err "Failed to install dnsmasq-full"
     msg ok "dnsmasq-full installed"
 else
     msg ok "dnsmasq-full already installed"
@@ -162,9 +302,9 @@ fi
 
 msg info "Checking kernel modules"
 for module in kmod-nft-tproxy kmod-nft-socket; do
-    if ! opkg list-installed | grep -q "^$module "; then
+    if ! pkg_is_installed "$module"; then
         msg info "Installing $module"
-        opkg install "$module" || msg err "Failed to install $module"
+        pkg_install "$module" || msg err "Failed to install $module"
         msg ok "$module installed"
     else
         msg ok "$module already installed"
@@ -207,17 +347,41 @@ if [ "$GITHUB_MODE" = false ]; then
 
     msg info "Configuring feeds"
     msg info "Downloading feed key"
+    FEED_KEY_URL=$(get_feed_key_url)
     curl -s -L --fail -o /tmp/passwall.pub "$FEED_KEY_URL" || msg err "Failed to download feed key"
-    opkg-key add /tmp/passwall.pub || msg err "Failed to add feed key"
+    case "$PACKAGE_MANAGER" in
+        apk)
+            mkdir -p /etc/apk/keys || msg err "Failed to prepare apk keys directory"
+            cp /tmp/passwall.pub /etc/apk/keys/openwrt-passwall-build.pub || msg err "Failed to add feed key"
+            ;;
+        opkg)
+            opkg-key add /tmp/passwall.pub || msg err "Failed to add feed key"
+            ;;
+    esac
     rm -f /tmp/passwall.pub
     msg ok "Feed key added"
 
     msg info "Writing feed entries"
-    [ -f /etc/opkg/customfeeds.conf ] && cp /etc/opkg/customfeeds.conf /etc/opkg/customfeeds.conf.bak
-    > /etc/opkg/customfeeds.conf
+    case "$PACKAGE_MANAGER" in
+        apk)
+            mkdir -p /etc/apk/repositories.d || msg err "Failed to prepare apk repositories directory"
+            FEED_CONFIG="/etc/apk/repositories.d/customfeeds.list"
+            [ -f "$FEED_CONFIG" ] && cp "$FEED_CONFIG" "$FEED_CONFIG.bak"
+            > "$FEED_CONFIG"
+            ;;
+        opkg)
+            FEED_CONFIG="/etc/opkg/customfeeds.conf"
+            [ -f "$FEED_CONFIG" ] && cp "$FEED_CONFIG" "$FEED_CONFIG.bak"
+            > "$FEED_CONFIG"
+            ;;
+    esac
 
-    for feed in passwall_luci passwall_packages passwall2; do
-        echo "src/gz $feed https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-$RELEASE_VER/$ARCH/$feed" >> /etc/opkg/customfeeds.conf
+    for feed in $FEED_NAMES; do
+        FEED_URL=$(get_feed_url "$feed")
+        case "$PACKAGE_MANAGER" in
+            apk) echo "$FEED_URL" >> "$FEED_CONFIG" ;;
+            opkg) echo "src/gz $feed $FEED_URL" >> "$FEED_CONFIG" ;;
+        esac
         msg ok "Added feed: $feed"
     done
 
@@ -226,7 +390,7 @@ if [ "$GITHUB_MODE" = false ]; then
 
     msg head "Install"
     msg info "Updating package lists"
-    opkg update || msg err "Failed to update package lists"
+    pkg_update || msg err "Failed to update package lists"
 
     FEED_PACKAGES_FILE=$(mktemp /tmp/passwall2-feed-packages.XXXXXX) || msg err "Failed to create temp file"
     INSTALLED_PACKAGES_FILE=$(mktemp /tmp/passwall2-installed-packages.XXXXXX) || msg err "Failed to create temp file"
@@ -247,8 +411,8 @@ if [ "$GITHUB_MODE" = false ]; then
 
         REMOVE_LOG=$(mktemp /tmp/passwall2-remove.XXXXXX) || msg err "Failed to create temp file"
 
-        if opkg list-installed | grep -q "^luci-app-passwall2 "; then
-            if ! opkg remove luci-app-passwall2 --force-depends >"$REMOVE_LOG" 2>&1; then
+        if pkg_is_installed luci-app-passwall2; then
+            if ! pkg_remove_force luci-app-passwall2 >"$REMOVE_LOG" 2>&1; then
                 cat "$REMOVE_LOG"
                 rm -f "$REMOVE_LOG"
                 msg err "Failed to remove Passwall2"
@@ -257,7 +421,7 @@ if [ "$GITHUB_MODE" = false ]; then
 
         if [ -n "$PASSWALL_INSTALLED_PACKAGES" ]; then
             msg info "Removing: $PASSWALL_INSTALLED_PACKAGES"
-            if ! opkg remove $PASSWALL_INSTALLED_PACKAGES --force-depends >"$REMOVE_LOG" 2>&1; then
+            if ! pkg_remove_force $PASSWALL_INSTALLED_PACKAGES >"$REMOVE_LOG" 2>&1; then
                 cat "$REMOVE_LOG"
                 rm -f "$REMOVE_LOG"
                 msg err "Failed to remove Passwall packages"
@@ -273,9 +437,9 @@ if [ "$GITHUB_MODE" = false ]; then
     msg head "Install"
     msg info "Installing Passwall2"
     INSTALL_LOG=$(mktemp /tmp/passwall2-install.XXXXXX) || msg err "Failed to create temp file"
-    if opkg install luci-app-passwall2 >"$INSTALL_LOG" 2>&1; then
+    if pkg_install luci-app-passwall2 >"$INSTALL_LOG" 2>&1; then
         cat "$INSTALL_LOG"
-        print_opkg_warnings "$INSTALL_LOG"
+        print_pkg_warnings "$INSTALL_LOG"
         rm -f "$INSTALL_LOG"
         msg ok "Passwall2 installed"
     else
@@ -300,9 +464,9 @@ if [ "$GITHUB_MODE" = false ]; then
         fi
 
         REFRESH_LOG=$(mktemp /tmp/passwall2-refresh.XXXXXX) || msg err "Failed to create temp file"
-        if opkg install $TARGET_PASSWALL_PACKAGES >"$REFRESH_LOG" 2>&1; then
+        if pkg_install $TARGET_PASSWALL_PACKAGES >"$REFRESH_LOG" 2>&1; then
             cat "$REFRESH_LOG"
-            print_opkg_warnings "$REFRESH_LOG"
+            print_pkg_warnings "$REFRESH_LOG"
             rm -f "$REFRESH_LOG"
         else
             cat "$REFRESH_LOG"
@@ -337,13 +501,16 @@ else
     RELEASE_TAG=$(echo "$API_RESPONSE" | jsonfilter -e '@.tag_name')
     msg ok "Release: ${C_BOLD}$RELEASE_TAG${C_RESET}"
 
-    LUCI_FILENAME=$(echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name' | grep "^luci-app-passwall2_" | grep -E "\.${PACKAGE_TYPE}$" | head -n 1)
+    case "$PACKAGE_TYPE" in
+        apk) LUCI_FILENAME=$(echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name' | grep "^luci-app-passwall2-" | grep -E "\.${PACKAGE_TYPE}$" | head -n 1) ;;
+        ipk) LUCI_FILENAME=$(echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name' | grep "^luci-app-passwall2_" | grep -E "\.${PACKAGE_TYPE}$" | head -n 1) ;;
+    esac
 
     ZIP_FILENAME=""
 
     if [ "$ONLY_LUCI" = false ]; then
         msg info "Resolving package set"
-        SUPPORTED_ARCHS=$(opkg print-architecture | awk '{print $2}' | awk '{a[NR]=$0} END {for(i=NR;i>0;i--) print a[i]}')
+        SUPPORTED_ARCHS=$(pkg_print_architectures)
 
         for arch in $SUPPORTED_ARCHS; do
             CANDIDATE_NAME="passwall_packages_${PACKAGE_TYPE}_${arch}.zip"
@@ -392,14 +559,16 @@ else
     if [ "$CLEAN_INSTALL" = true ]; then
         msg head "Cleanup"
         msg info "Removing existing installation"
-        opkg remove luci-app-passwall2 --force-depends >/dev/null 2>&1
+        pkg_remove_force luci-app-passwall2 >/dev/null 2>&1
 
         if [ "$ONLY_LUCI" = false ]; then
-            for ipk in *.ipk; do
-                pkg_name=$(echo "$ipk" | cut -d'_' -f1)
+            for pkg_file in *."$PACKAGE_TYPE"; do
+                [ -f "$pkg_file" ] || continue
+                [ "$pkg_file" = "$LUCI_FILENAME" ] && continue
+                pkg_name=$(get_local_package_name "$pkg_file")
                 if [ "$pkg_name" != "libc" ] && [ "$pkg_name" != "kernel" ]; then
-                    [ "$pkg_name" = "simple-obfs-client" ] && opkg remove simple-obfs --force-depends >/dev/null 2>&1
-                    opkg remove "$pkg_name" --force-depends >/dev/null 2>&1
+                    [ "$pkg_name" = "simple-obfs-client" ] && pkg_remove_force simple-obfs >/dev/null 2>&1
+                    pkg_remove_force "$pkg_name" >/dev/null 2>&1
                 fi
             done
         fi
@@ -410,15 +579,16 @@ else
 
     if [ "$ONLY_LUCI" = false ]; then
         msg info "Installing packages"
-        for ipk in *.ipk; do
-            [ "$ipk" = "$LUCI_FILENAME" ] && continue
+        for pkg_file in *."$PACKAGE_TYPE"; do
+            [ -f "$pkg_file" ] || continue
+            [ "$pkg_file" = "$LUCI_FILENAME" ] && continue
 
             ERROR_LOG=$(mktemp)
-            if opkg install "$ipk" --force-reinstall >/dev/null 2>"$ERROR_LOG"; then
-                echo -e "${C_GREEN}[OK]${C_RESET} ${ipk}"
-                rm "$ipk"
+            if pkg_install_local "$pkg_file" >/dev/null 2>"$ERROR_LOG"; then
+                echo -e "${C_GREEN}[OK]${C_RESET} ${pkg_file}"
+                rm "$pkg_file"
             else
-                echo -e "${C_RED}[ERROR]${C_RESET} ${ipk}"
+                echo -e "${C_RED}[ERROR]${C_RESET} ${pkg_file}"
                 if [ -s "$ERROR_LOG" ]; then
                     echo -e "${C_YELLOW}[WARN]${C_RESET} Error details:"
                     cat "$ERROR_LOG" | sed 's/^/    /'
@@ -433,7 +603,7 @@ else
 
     msg info "Installing LuCI package"
     ERROR_LOG=$(mktemp)
-    if opkg install "$LUCI_FILENAME" --force-reinstall >/dev/null 2>"$ERROR_LOG"; then
+    if pkg_install_local "$LUCI_FILENAME" >/dev/null 2>"$ERROR_LOG"; then
         rm "$LUCI_FILENAME"
         rm -f "$ERROR_LOG"
         msg ok "LuCI installed"
