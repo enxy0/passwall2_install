@@ -60,6 +60,37 @@ pkg_install() {
     esac
 }
 
+pkg_install_feed() {
+    case "$PACKAGE_MANAGER" in
+        apk)
+            if [ "$ALLOW_UNTRUSTED_FEEDS" = true ]; then
+                apk add --upgrade --allow-untrusted "$@"
+            else
+                apk add --upgrade "$@"
+            fi
+            ;;
+        opkg) opkg install "$@" ;;
+    esac
+}
+
+pkg_update_feed() {
+    local log_file="$1"
+
+    if pkg_update >"$log_file" 2>&1; then
+        return 0
+    fi
+
+    if [ "$PACKAGE_MANAGER" = "apk" ] && grep -q 'UNTRUSTED signature' "$log_file"; then
+        cat "$log_file"
+        msg warn "Passwall apk feed signature is not trusted by apk; retrying with --allow-untrusted"
+        ALLOW_UNTRUSTED_FEEDS=true
+        apk update --allow-untrusted >"$log_file" 2>&1
+        return $?
+    fi
+
+    return 1
+}
+
 pkg_install_local() {
     case "$PACKAGE_MANAGER" in
         apk) apk add --allow-untrusted --force-reinstall "$1" ;;
@@ -79,6 +110,36 @@ pkg_remove_force() {
         apk) apk del "$@" ;;
         opkg) opkg remove "$@" --force-depends ;;
     esac
+}
+
+ensure_direct_resolver() {
+    [ -f /tmp/resolv.conf ] || return 0
+
+    local has_loopback=false
+    local has_direct=false
+    local key value
+
+    while read -r key value _; do
+        [ "$key" = "nameserver" ] || continue
+        case "$value" in
+            127.*|::1) has_loopback=true ;;
+            *) has_direct=true ;;
+        esac
+    done < /tmp/resolv.conf
+
+    if [ "$has_direct" = false ]; then
+        cp /tmp/resolv.conf /tmp/resolv.conf.passwall2.bak 2>/dev/null || true
+        {
+            grep '^search ' /tmp/resolv.conf 2>/dev/null
+            echo 'nameserver 9.9.9.9'
+            echo 'nameserver 1.1.1.1'
+        } > /tmp/resolv.conf
+        if [ "$has_loopback" = true ]; then
+            msg warn "Using temporary direct resolvers while replacing dnsmasq"
+        else
+            msg warn "Using temporary direct resolvers because no system resolver is configured"
+        fi
+    fi
 }
 
 ensure_command() {
@@ -152,14 +213,19 @@ get_feed_url() {
 get_architecture() {
     local arch=""
 
+    if [ -r /etc/openwrt_release ]; then
+        arch=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
+    fi
+
+    if [ -n "$arch" ]; then
+        echo "$arch"
+        return
+    fi
+
     if [ "$PACKAGE_MANAGER" = "opkg" ]; then
         arch=$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -1)
     elif [ "$PACKAGE_MANAGER" = "apk" ]; then
         arch=$(apk --print-arch 2>/dev/null)
-    fi
-
-    if [ -z "$arch" ] && [ -r /etc/openwrt_release ]; then
-        arch=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
     fi
 
     echo "$arch"
@@ -240,6 +306,7 @@ GITHUB_MODE=false
 TARGET_VERSION=""
 CLEAN_INSTALL=false
 ONLY_LUCI=false
+ALLOW_UNTRUSTED_FEEDS=false
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -271,6 +338,8 @@ else
     msg err "No internet connection"
 fi
 
+ensure_direct_resolver
+
 ensure_command /usr/bin/unzip unzip
 ensure_command /usr/bin/curl curl
 ensure_command /usr/bin/jsonfilter jsonfilter
@@ -289,10 +358,7 @@ msg head "Dependencies"
 
 msg info "Checking dnsmasq-full"
 if ! pkg_is_installed dnsmasq-full; then
-    if pkg_is_installed dnsmasq; then
-        msg info "Removing dnsmasq"
-        pkg_remove dnsmasq || msg err "Failed to remove dnsmasq"
-    fi
+    ensure_direct_resolver
     msg info "Installing dnsmasq-full"
     pkg_install dnsmasq-full || msg err "Failed to install dnsmasq-full"
     msg ok "dnsmasq-full installed"
@@ -390,7 +456,15 @@ if [ "$GITHUB_MODE" = false ]; then
 
     msg head "Install"
     msg info "Updating package lists"
-    pkg_update || msg err "Failed to update package lists"
+    UPDATE_LOG=$(mktemp /tmp/passwall2-update.XXXXXX) || msg err "Failed to create temp file"
+    if pkg_update_feed "$UPDATE_LOG"; then
+        cat "$UPDATE_LOG"
+        rm -f "$UPDATE_LOG"
+    else
+        cat "$UPDATE_LOG"
+        rm -f "$UPDATE_LOG"
+        msg err "Failed to update package lists"
+    fi
 
     FEED_PACKAGES_FILE=$(mktemp /tmp/passwall2-feed-packages.XXXXXX) || msg err "Failed to create temp file"
     INSTALLED_PACKAGES_FILE=$(mktemp /tmp/passwall2-installed-packages.XXXXXX) || msg err "Failed to create temp file"
@@ -437,7 +511,7 @@ if [ "$GITHUB_MODE" = false ]; then
     msg head "Install"
     msg info "Installing Passwall2"
     INSTALL_LOG=$(mktemp /tmp/passwall2-install.XXXXXX) || msg err "Failed to create temp file"
-    if pkg_install luci-app-passwall2 >"$INSTALL_LOG" 2>&1; then
+    if pkg_install_feed luci-app-passwall2 >"$INSTALL_LOG" 2>&1; then
         cat "$INSTALL_LOG"
         print_pkg_warnings "$INSTALL_LOG"
         rm -f "$INSTALL_LOG"
@@ -464,7 +538,7 @@ if [ "$GITHUB_MODE" = false ]; then
         fi
 
         REFRESH_LOG=$(mktemp /tmp/passwall2-refresh.XXXXXX) || msg err "Failed to create temp file"
-        if pkg_install $TARGET_PASSWALL_PACKAGES >"$REFRESH_LOG" 2>&1; then
+        if pkg_install_feed $TARGET_PASSWALL_PACKAGES >"$REFRESH_LOG" 2>&1; then
             cat "$REFRESH_LOG"
             print_pkg_warnings "$REFRESH_LOG"
             rm -f "$REFRESH_LOG"
