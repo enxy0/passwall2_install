@@ -85,8 +85,14 @@ pkg_update_feed() {
         cat "$log_file"
         msg warn "Passwall apk feed signature is not trusted by apk; retrying with --allow-untrusted"
         ALLOW_UNTRUSTED_FEEDS=true
-        apk update --allow-untrusted >"$log_file" 2>&1
-        return $?
+        if apk update --allow-untrusted >"$log_file" 2>&1; then
+            return 0
+        fi
+    fi
+
+    if [ "$PACKAGE_MANAGER" = "apk" ] && apk search --from system --exact luci-app-passwall2 2>/dev/null | grep -q '^luci-app-passwall2-'; then
+        msg warn "Using cached package indexes after failed refresh"
+        return 0
     fi
 
     return 1
@@ -177,7 +183,13 @@ pkg_list_upgradable() {
 
 pkg_available() {
     case "$PACKAGE_MANAGER" in
-        apk) apk search --from system --exact "$1" 2>/dev/null | grep -q "^$1-" ;;
+        apk)
+            if [ "$ALLOW_UNTRUSTED_FEEDS" = true ]; then
+                apk search --allow-untrusted --from system --exact "$1" 2>/dev/null | grep -q "^$1-"
+            else
+                apk search --from system --exact "$1" 2>/dev/null | grep -q "^$1-"
+            fi
+            ;;
         opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 -" ;;
     esac
 }
@@ -200,6 +212,20 @@ install_available_feed_packages() {
 
     msg info "Installing: $available"
     pkg_install_feed $available
+}
+
+list_installed_named_packages() {
+    local packages="$1"
+    local installed=""
+    local package=""
+
+    for package in $packages; do
+        if pkg_is_installed "$package"; then
+            installed="$installed $package"
+        fi
+    done
+
+    echo "$installed" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
 pkg_print_architectures() {
@@ -227,6 +253,44 @@ get_feed_key_url() {
         apk) echo "${FEED_BASE_URL}/apk.pub" ;;
         opkg) echo "${FEED_BASE_URL}/ipk.pub" ;;
     esac
+}
+
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    curl -s -L --fail --retry 3 --connect-timeout 20 -o "$output" "$url"
+}
+
+install_feed_key() {
+    local key_file=""
+    local key_url=""
+
+    key_url=$(get_feed_key_url)
+    case "$PACKAGE_MANAGER" in
+        apk)
+            key_file="/etc/apk/keys/openwrt-passwall-build.pub"
+            if [ -s "$key_file" ]; then
+                msg ok "Feed key already exists"
+                return 0
+            fi
+
+            download_file "$key_url" /tmp/passwall.pub || \
+                download_file "https://sourceforge.net/projects/openwrt-passwall-build/files/apk.pub/download" /tmp/passwall.pub || \
+                msg err "Failed to download feed key"
+            mkdir -p /etc/apk/keys || msg err "Failed to prepare apk keys directory"
+            cp /tmp/passwall.pub "$key_file" || msg err "Failed to add feed key"
+            ;;
+        opkg)
+            download_file "$key_url" /tmp/passwall.pub || \
+                download_file "https://sourceforge.net/projects/openwrt-passwall-build/files/ipk.pub/download" /tmp/passwall.pub || \
+                msg err "Failed to download feed key"
+            opkg-key add /tmp/passwall.pub || msg err "Failed to add feed key"
+            ;;
+    esac
+
+    rm -f /tmp/passwall.pub
+    msg ok "Feed key added"
 }
 
 get_feed_url() {
@@ -441,19 +505,7 @@ if [ "$GITHUB_MODE" = false ]; then
 
     msg info "Configuring feeds"
     msg info "Downloading feed key"
-    FEED_KEY_URL=$(get_feed_key_url)
-    curl -s -L --fail -o /tmp/passwall.pub "$FEED_KEY_URL" || msg err "Failed to download feed key"
-    case "$PACKAGE_MANAGER" in
-        apk)
-            mkdir -p /etc/apk/keys || msg err "Failed to prepare apk keys directory"
-            cp /tmp/passwall.pub /etc/apk/keys/openwrt-passwall-build.pub || msg err "Failed to add feed key"
-            ;;
-        opkg)
-            opkg-key add /tmp/passwall.pub || msg err "Failed to add feed key"
-            ;;
-    esac
-    rm -f /tmp/passwall.pub
-    msg ok "Feed key added"
+    install_feed_key
 
     msg info "Writing feed entries"
     case "$PACKAGE_MANAGER" in
@@ -514,6 +566,7 @@ if [ "$GITHUB_MODE" = false ]; then
         REMOVE_LOG=$(mktemp /tmp/passwall2-remove.XXXXXX) || msg err "Failed to create temp file"
 
         if pkg_is_installed luci-app-passwall2; then
+            msg info "Removing luci-app-passwall2"
             if ! pkg_remove_force luci-app-passwall2 >"$REMOVE_LOG" 2>&1; then
                 cat "$REMOVE_LOG"
                 rm -f "$REMOVE_LOG"
@@ -529,7 +582,19 @@ if [ "$GITHUB_MODE" = false ]; then
                 msg err "Failed to remove Passwall packages"
             fi
         else
-            msg info "No installed Passwall packages to remove"
+            msg info "No additional installed Passwall feed packages to remove"
+        fi
+
+        RUNTIME_INSTALLED_PACKAGES=$(list_installed_named_packages "$FEED_RUNTIME_PACKAGES")
+        if [ -n "$RUNTIME_INSTALLED_PACKAGES" ]; then
+            msg info "Removing runtime packages: $RUNTIME_INSTALLED_PACKAGES"
+            if ! pkg_remove_force $RUNTIME_INSTALLED_PACKAGES >"$REMOVE_LOG" 2>&1; then
+                cat "$REMOVE_LOG"
+                rm -f "$REMOVE_LOG"
+                msg err "Failed to remove Passwall runtime packages"
+            fi
+        else
+            msg info "No installed Passwall runtime packages to remove"
         fi
 
         rm -f "$REMOVE_LOG"
