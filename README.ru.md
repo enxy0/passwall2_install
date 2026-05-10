@@ -80,7 +80,7 @@ Examples:
 4. При необходимости заменяет обычный `dnsmasq` на `dnsmasq-full`
 5. Автоматически определяет архитектуру OpenWrt
 6. Создает резервную копию `/etc/config/passwall2`, если файл существует
-7. Устанавливает Passwall2 и связанные пакеты
+7. Устанавливает Passwall2 и основные runtime-бинарники, включая Xray, sing-box, chinadns-ng, Hysteria, HAProxy, microsocks и NaiveProxy, если они доступны в feed
 8. Удаляет временные файлы
 
 ## После установки

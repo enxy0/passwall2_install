@@ -11,6 +11,7 @@ MIN_SPACE_KB=20480
 
 FEED_BASE_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
 FEED_NAMES="passwall_luci passwall_packages passwall2"
+FEED_RUNTIME_PACKAGES="xray-core sing-box chinadns-ng hysteria haproxy microsocks naiveproxy"
 
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
@@ -172,6 +173,33 @@ pkg_list_upgradable() {
             ;;
         opkg) opkg list-upgradable | awk '{print $1}' | sort -u ;;
     esac
+}
+
+pkg_available() {
+    case "$PACKAGE_MANAGER" in
+        apk) apk search --from system --exact "$1" 2>/dev/null | grep -q "^$1-" ;;
+        opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 -" ;;
+    esac
+}
+
+install_available_feed_packages() {
+    local packages="$1"
+    local available=""
+    local package=""
+
+    for package in $packages; do
+        if pkg_available "$package"; then
+            available="$available $package"
+        else
+            msg warn "Package not available in feeds: $package"
+        fi
+    done
+
+    available=$(echo "$available" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -n "$available" ] || return 0
+
+    msg info "Installing: $available"
+    pkg_install_feed $available
 }
 
 pkg_print_architectures() {
@@ -521,6 +549,20 @@ if [ "$GITHUB_MODE" = false ]; then
         print_space_hint "$INSTALL_LOG"
         rm -f "$INSTALL_LOG"
         msg err "Failed to install Passwall2"
+    fi
+
+    msg head "Runtime packages"
+    RUNTIME_LOG=$(mktemp /tmp/passwall2-runtime.XXXXXX) || msg err "Failed to create temp file"
+    if install_available_feed_packages "$FEED_RUNTIME_PACKAGES" >"$RUNTIME_LOG" 2>&1; then
+        cat "$RUNTIME_LOG"
+        print_pkg_warnings "$RUNTIME_LOG"
+        rm -f "$RUNTIME_LOG"
+        msg ok "Runtime packages installed"
+    else
+        cat "$RUNTIME_LOG"
+        print_space_hint "$RUNTIME_LOG"
+        rm -f "$RUNTIME_LOG"
+        msg err "Failed to install runtime packages"
     fi
 
     msg head "Passwall packages"
