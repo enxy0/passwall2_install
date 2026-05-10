@@ -406,10 +406,10 @@ while [ "$#" -gt 0 ]; do
         -g|--github)
             GITHUB_MODE=true
             shift
-            if [ -n "$1" ] && case "$1" in -*) ;; *) true;; esac; then
-                TARGET_VERSION="$1"
-                shift
-            fi
+            case "$1" in
+                ""|-*) ;;
+                *) TARGET_VERSION="$1"; shift ;;
+            esac
             ;;
         -c|--clean) CLEAN_INSTALL=true; shift ;;
         -l|--only-luci) ONLY_LUCI=true; shift ;;
