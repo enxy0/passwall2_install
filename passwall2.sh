@@ -11,7 +11,7 @@ MIN_SPACE_KB=20480
 
 FEED_BASE_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
 FEED_NAMES="passwall_luci passwall_packages passwall2"
-FEED_RUNTIME_PACKAGES="xray-core sing-box chinadns-ng hysteria haproxy microsocks naiveproxy"
+FEED_RUNTIME_PACKAGES="xray-core sing-box chinadns-ng hysteria geoview v2ray-geoip v2ray-geosite haproxy microsocks naiveproxy tcping"
 
 C_RESET='\033[0m'
 C_BOLD='\033[1m'
@@ -90,8 +90,9 @@ pkg_update_feed() {
         fi
     fi
 
-    if [ "$PACKAGE_MANAGER" = "apk" ] && apk search --from system --exact luci-app-passwall2 2>/dev/null | grep -q '^luci-app-passwall2-'; then
+    if [ "$PACKAGE_MANAGER" = "apk" ] && apk search --allow-untrusted --from repositories --exact luci-app-passwall2 2>/dev/null | grep -q '^luci-app-passwall2-'; then
         msg warn "Using cached package indexes after failed refresh"
+        ALLOW_UNTRUSTED_FEEDS=true
         return 0
     fi
 
@@ -185,19 +186,76 @@ pkg_available() {
     case "$PACKAGE_MANAGER" in
         apk)
             if [ "$ALLOW_UNTRUSTED_FEEDS" = true ]; then
-                apk search --allow-untrusted --from system --exact "$1" 2>/dev/null | grep -q "^$1-"
+                apk search --allow-untrusted --from repositories --exact "$1" 2>/dev/null | grep -q "^$1-"
             else
-                apk search --from system --exact "$1" 2>/dev/null | grep -q "^$1-"
+                apk search --from repositories --exact "$1" 2>/dev/null | grep -q "^$1-"
             fi
             ;;
         opkg) opkg list "$1" 2>/dev/null | grep -q "^$1 -" ;;
     esac
 }
 
+ensure_feed_packages_available() {
+    local missing=""
+    local package=""
+
+    for package in luci-app-passwall2 $FEED_RUNTIME_PACKAGES; do
+        if ! pkg_available "$package"; then
+            missing="$missing $package"
+        fi
+    done
+
+    missing=$(echo "$missing" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ -n "$missing" ]; then
+        msg err "Required feed packages are unavailable: $missing. Use --github or retry after feed refresh works."
+    fi
+}
+
+get_apk_feed_version() {
+    local package="$1"
+
+    apk --allow-untrusted policy "$package" 2>/dev/null | awk -v feed_base="$FEED_BASE_URL" '
+        $1 ~ /:$/ {
+            version=$1
+            sub(/:$/, "", version)
+            next
+        }
+        index($0, feed_base) && version != "" {
+            print version
+            exit
+        }
+    '
+}
+
+get_feed_install_args() {
+    local packages="$1"
+    local args=""
+    local package=""
+    local version=""
+
+    case "$PACKAGE_MANAGER" in
+        apk)
+            for package in $packages; do
+                version=$(get_apk_feed_version "$package")
+
+                if [ -n "$version" ]; then
+                    args="$args $package=$version"
+                else
+                    args="$args $package"
+                fi
+            done
+            ;;
+        opkg) args="$packages" ;;
+    esac
+
+    echo "$args" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 install_available_feed_packages() {
     local packages="$1"
     local available=""
     local package=""
+    local install_args=""
 
     for package in $packages; do
         if pkg_available "$package"; then
@@ -210,8 +268,35 @@ install_available_feed_packages() {
     available=$(echo "$available" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     [ -n "$available" ] || return 0
 
-    msg info "Installing: $available"
-    pkg_install_feed $available
+    install_args=$(get_feed_install_args "$available")
+    msg info "Installing: $install_args"
+    pkg_install_feed $install_args
+}
+
+ensure_dnsmasq_full() {
+    msg info "Checking dnsmasq-full"
+    if pkg_is_installed dnsmasq-full; then
+        msg ok "dnsmasq-full already installed"
+        return 0
+    fi
+
+    ensure_direct_resolver
+    case "$PACKAGE_MANAGER" in
+        opkg)
+            if pkg_is_installed dnsmasq; then
+                msg info "Removing dnsmasq"
+                pkg_remove dnsmasq || msg err "Failed to remove dnsmasq"
+            fi
+            ;;
+    esac
+
+    msg info "Installing dnsmasq-full"
+    pkg_install dnsmasq-full || msg err "Failed to install dnsmasq-full"
+    msg ok "dnsmasq-full installed"
+
+    if [ -x /etc/init.d/dnsmasq ]; then
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || msg warn "dnsmasq restart failed; check DNS manually"
+    fi
 }
 
 list_installed_named_packages() {
@@ -448,15 +533,7 @@ fi
 
 msg head "Dependencies"
 
-msg info "Checking dnsmasq-full"
-if ! pkg_is_installed dnsmasq-full; then
-    ensure_direct_resolver
-    msg info "Installing dnsmasq-full"
-    pkg_install dnsmasq-full || msg err "Failed to install dnsmasq-full"
-    msg ok "dnsmasq-full installed"
-else
-    msg ok "dnsmasq-full already installed"
-fi
+ensure_dnsmasq_full
 
 msg info "Checking kernel modules"
 for module in kmod-nft-tproxy kmod-nft-socket; do
@@ -553,6 +630,8 @@ if [ "$GITHUB_MODE" = false ]; then
     list_feed_packages > "$FEED_PACKAGES_FILE"
     list_installed_packages > "$INSTALLED_PACKAGES_FILE"
     list_upgradable_packages > "$UPGRADABLE_PACKAGES_FILE"
+
+    ensure_feed_packages_available
 
     PASSWALL_INSTALLED_PACKAGES=$(grep -Fxf "$INSTALLED_PACKAGES_FILE" "$FEED_PACKAGES_FILE" | grep -vx "luci-app-passwall2" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     PASSWALL_UPGRADABLE_PACKAGES=$(grep -Fxf "$UPGRADABLE_PACKAGES_FILE" "$FEED_PACKAGES_FILE" | grep -vx "luci-app-passwall2" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
