@@ -2,7 +2,7 @@
 
 English | [Русский](README.ru.md)
 
-Automated installation script for Passwall2 on OpenWrt routers. Supports SourceForge feed installation for routine updates and GitHub release installation for specific versions, using either `opkg` or `apk` depending on the OpenWrt release.
+Automated installation script for Passwall2 on OpenWrt routers. It installs Passwall2 from the official GitHub releases of [Openwrt-Passwall/openwrt-passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2), using either `opkg` or `apk` depending on the OpenWrt release.
 
 ## Quick install
 
@@ -14,62 +14,45 @@ cd /tmp && rm -f passwall2.sh && wget -O passwall2.sh https://raw.githubusercont
 
 ## Features
 
-- **Two installation modes**:
-  - **SourceForge feed** (default): uses package feeds for easier updates through the detected package manager
-  - **GitHub releases**: installs the latest or a specific release directly
+- **GitHub release installation**: installs the latest release by default or a specific release when provided
 - **Package manager detection**: uses `apk` on OpenWrt 25.x builds and `opkg` on older builds
 - **Automatic architecture detection**: detects the device architecture automatically
 - **Dependency management**: installs required packages such as `dnsmasq-full`, kernel modules, `curl`, `unzip`, and `jsonfilter`
 - **Configuration backup**: backs up the existing Passwall2 configuration before installation
 - **Clean install option**: removes existing packages before reinstalling
-- **LuCI-only mode**: installs only the web interface in GitHub mode
+- **LuCI-only mode**: installs only the web interface
 - **Error reporting**: shows installation errors and common recovery hints
 
-## Installation modes
+## Installation
 
-### 1. SourceForge feed installation
-
-Default mode. Uses SourceForge package feeds for standard installation and follow-up updates:
+Install the latest release:
 
 ```sh
 ./passwall2.sh
 ```
 
-Advantages:
-
-- Updates remain available through the system package manager (`apk` or `opkg`)
-- Dependency resolution stays with the package manager
-- Feed packages are signed
-
-### 2. GitHub release installation
-
-Install the latest release or a specific version directly from GitHub:
+Install a specific release:
 
 ```sh
-# Install the latest release
-./passwall2.sh -g
-
-# Install a specific version
-./passwall2.sh -g v26.2.14-1
+./passwall2.sh 26.6.3-1
 ```
 
 ## Usage
 
 ```text
-Usage: ./passwall2.sh [OPTIONS]
+Usage: ./passwall2.sh [OPTIONS] [VER]
 
 Options:
-  -g, --github [VER]  Install from GitHub releases. Optional version (e.g., v26.2.14-1)
+  [VER]               Optional release version (e.g., 26.6.3-1)
   -c, --clean         Clean install (remove old packages first)
-  -l, --only-luci     Install only LuCI interface (skip binaries). GitHub mode only
+  -l, --only-luci     Install only LuCI interface (skip binaries)
   -h, --help          Show help message
 
 Examples:
-  ./passwall2.sh                Install latest from SourceForge feed
-  ./passwall2.sh -g             Install latest from GitHub
-  ./passwall2.sh -g v26.2.14-1  Install a specific version from GitHub
-  ./passwall2.sh -g -c          Clean install from GitHub
-  ./passwall2.sh -g -l          LuCI-only install from GitHub
+  ./passwall2.sh             Install latest release
+  ./passwall2.sh 26.6.3-1    Install a specific release
+  ./passwall2.sh -c          Clean install of latest release
+  ./passwall2.sh -l          LuCI-only install
 ```
 
 ## What the script does
@@ -80,8 +63,9 @@ Examples:
 4. Replaces basic `dnsmasq` with `dnsmasq-full` when needed
 5. Detects the OpenWrt architecture automatically
 6. Backs up the existing `/etc/config/passwall2` configuration if present
-7. Installs Passwall2 and common runtime binaries such as Xray, sing-box, chinadns-ng, Hysteria, HAProxy, microsocks, and NaiveProxy when available in the feed
-8. Cleans up temporary files
+7. Downloads the matching LuCI package and runtime package archive from GitHub releases
+8. Installs Passwall2 and bundled runtime packages such as Xray, sing-box, chinadns-ng, Hysteria, HAProxy, microsocks, and NaiveProxy when present in the release archive
+9. Cleans up temporary files
 
 ## After installation
 
@@ -101,20 +85,19 @@ Use `-c` to remove existing packages before reinstalling:
 
 **No compatible binary package**
 
-Use `-l` for a LuCI-only installation in GitHub mode:
+Use `-l` for a LuCI-only installation:
 
 ```sh
-./passwall2.sh -g -l
+./passwall2.sh -l
 ```
 
 **Installation fails**
 
-Check internet connectivity, DNS settings, and available storage.
+Check internet connectivity, DNS settings, available storage, and whether the selected Passwall2 release has assets for your architecture.
 
 ## Credits
 
 - [Passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2): original project by the OpenWrt Passwall team
-- SourceForge feed maintained by the Passwall community
 
 ## License
 
