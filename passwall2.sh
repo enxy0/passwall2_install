@@ -1,5 +1,6 @@
 #!/bin/sh
 
+SCRIPT_NAME="passwall2.sh"
 PACKAGE_MANAGER=""
 PACKAGE_TYPE=""
 REPO_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases"
@@ -97,7 +98,7 @@ print_error_log() {
         note "Package manager output:"
         sed 's/^/    /' "$log_file"
         if grep -qiE "(space|No space left|disk full|available on filesystem|needs|verify_pkg_installable)" "$log_file"; then
-            note "Try: $0 --clean"
+            note "Try: $SCRIPT_NAME --clean"
         fi
     fi
 }
@@ -244,6 +245,50 @@ ensure_dnsmasq_full() {
     fi
 }
 
+ensure_cores() {
+    local core=""
+    local wanted=""
+    local missing=""
+    local core_log=""
+
+    section "Proxy cores"
+
+    [ "$INSTALL_XRAY" = true ] && wanted="$wanted xray-core"
+    [ "$INSTALL_SING_BOX" = true ] && wanted="$wanted sing-box"
+
+    if [ -z "$wanted" ]; then
+        note "Skipped (--no-xray and --no-sing-box)"
+        return 0
+    fi
+
+    for core in $wanted; do
+        if pkg_is_installed "$core"; then
+            line "$core" "already installed"
+        else
+            missing="$missing $core"
+        fi
+    done
+
+    if [ -z "$missing" ]; then
+        return 0
+    fi
+
+    ensure_direct_resolver
+    pkg_update >/dev/null 2>&1 || true
+
+    for core in $missing; do
+        note "Installing $core from the official OpenWrt feeds..."
+        core_log=$(mktemp)
+        if pkg_install "$core" >/dev/null 2>"$core_log"; then
+            line "$core" "installed"
+        else
+            print_error_log "$core_log"
+            warn "Failed to install $core from the official feeds. Install a core manually if Passwall2 has none."
+        fi
+        rm -f "$core_log"
+    done
+}
+
 pkg_print_architectures() {
     case "$PACKAGE_MANAGER" in
         apk)
@@ -296,23 +341,28 @@ get_release_version() {
 }
 
 show_help() {
-    echo "Usage: $0 [OPTIONS] [VER]"
+    echo "Usage: $SCRIPT_NAME [OPTIONS] [VER]"
     echo ""
     echo "Description:"
     echo "  Install Passwall2 from GitHub releases."
     echo "  Automatically uses apk or opkg, depending on availability."
+    echo "  Upstream releases no longer ship a proxy core, so xray-core and"
+    echo "  sing-box are installed from the official OpenWrt feeds."
     echo ""
     echo "Options:"
     echo "  [VER]               Optional release version (e.g., 26.6.3-1)."
     echo "  -c, --clean         Clean install (remove old packages first)."
     echo "  -l, --only-luci     Install only LuCI interface (skip binaries)."
+    echo "      --no-xray       Do not install xray-core."
+    echo "      --no-sing-box   Do not install sing-box (~44 MB on flash)."
     echo "  -h, --help          Show this help message."
     echo ""
     echo "Examples:"
-    echo "  $0                  Install latest release"
-    echo "  $0 26.6.3-1         Install specific release"
-    echo "  $0 -c               Clean install of latest release"
-    echo "  $0 -l               Install only LuCI package"
+    echo "  $SCRIPT_NAME                  Install latest release"
+    echo "  $SCRIPT_NAME 26.6.3-1         Install specific release"
+    echo "  $SCRIPT_NAME -c               Clean install of latest release"
+    echo "  $SCRIPT_NAME -l               Install only LuCI package"
+    echo "  $SCRIPT_NAME --no-sing-box    Install latest release with xray-core only"
     echo ""
     exit 0
 }
@@ -320,12 +370,16 @@ show_help() {
 TARGET_VERSION=""
 CLEAN_INSTALL=false
 ONLY_LUCI=false
+INSTALL_XRAY=true
+INSTALL_SING_BOX=true
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) show_help ;;
         -c|--clean) CLEAN_INSTALL=true; shift ;;
         -l|--only-luci) ONLY_LUCI=true; shift ;;
+        --no-xray) INSTALL_XRAY=false; shift ;;
+        --no-sing-box) INSTALL_SING_BOX=false; shift ;;
         -*) msg err "Unknown option: $1" ;;
         *)
             if [ -n "$TARGET_VERSION" ]; then
@@ -385,6 +439,10 @@ for module in kmod-nft-tproxy kmod-nft-socket; do
         pkg_install "$module" || msg err "Failed to install $module"
     fi
 done
+
+if [ "$ONLY_LUCI" = false ]; then
+    ensure_cores
+fi
 
 section "Preparing"
 cd "$TEMP_DIR" || msg err "Failed to prepare temp directory"
@@ -532,6 +590,11 @@ else
     print_error_log "$ERROR_LOG"
     rm -f "$ERROR_LOG"
     msg err "Failed to install LuCI package"
+fi
+
+if [ ! -e /usr/bin/xray ] && [ ! -e /usr/bin/sing-box ]; then
+    warn "No proxy core is installed. Passwall2 will not start without xray-core or sing-box."
+    note "Install one with: $SCRIPT_NAME (default), or manually: apk add xray-core (opkg install xray-core)"
 fi
 
 section "Done"
