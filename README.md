@@ -31,7 +31,9 @@ sh passwall2.sh
 
 ## Proxy cores
 
-Since upstream release `26.8.27` the Passwall2 runtime archive no longer contains a proxy core: `xray-core` and `sing-box` were dropped from it, together with the standalone Hysteria2 and naive cores. Without a core Passwall2 starts but fails silently. The script therefore installs `xray-core` and `sing-box` from the official OpenWrt feeds. Use `--no-xray` or `--no-sing-box` to skip a core, for example on a device with little flash (`sing-box` needs about 44 MB).
+Since upstream release `26.8.27` the Passwall2 runtime archive no longer contains a proxy core: `xray-core` and `sing-box` were dropped from it, together with the standalone Hysteria2 and naive cores. Without a core Passwall2 starts but fails silently.
+
+Cores that come with the runtime archive are used as they are. The official OpenWrt feeds are only a fallback: after the runtime packages are installed, the script installs from the feeds any core that the archive did not provide. Older releases therefore need no extra download. Use `--no-xray` or `--no-sing-box` to skip a core, for example on a device with little flash (`sing-box` needs about 44 MB).
 
 ## Features
 
@@ -42,7 +44,7 @@ Since upstream release `26.8.27` the Passwall2 runtime archive no longer contain
 - **Configuration backup**: backs up the existing Passwall2 configuration before installation
 - **Clean install option**: removes existing packages before reinstalling
 - **LuCI-only mode**: installs only the web interface
-- **Proxy core installation**: installs `xray-core` and `sing-box` from the official OpenWrt feeds, because upstream releases no longer bundle them
+- **Proxy core fallback**: installs `xray-core` and `sing-box` from the official OpenWrt feeds when the release archive does not bundle them
 - **Error reporting**: shows installation errors and common recovery hints
 
 ## Installation
@@ -86,12 +88,12 @@ Examples:
 2. Detects `apk` or `opkg` and installs required tools such as `curl`, `unzip`, and `jsonfilter`
 3. Ensures `kmod-nft-tproxy` and `kmod-nft-socket` are installed
 4. Replaces basic `dnsmasq` with `dnsmasq-full` when needed
-5. Installs the missing proxy cores `xray-core` and `sing-box` from the official OpenWrt feeds
-6. Detects the OpenWrt architecture automatically
-7. Backs up the existing `/etc/config/passwall2` configuration if present
-8. Downloads the matching LuCI package and runtime package archive from GitHub releases
-9. Installs Passwall2 and the bundled runtime packages such as chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, and the geodata files
-10. Warns when no proxy core is present after the installation
+5. Detects the OpenWrt architecture automatically
+6. Backs up the existing `/etc/config/passwall2` configuration if present
+7. Downloads the matching LuCI package and runtime package archive from GitHub releases
+8. Installs the bundled runtime packages such as chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, and the geodata files
+9. Installs `xray-core` and `sing-box` from the official OpenWrt feeds if the archive did not provide them
+10. Installs the Passwall2 LuCI package and warns when no proxy core is present
 11. Cleans up temporary files
 
 ## After installation

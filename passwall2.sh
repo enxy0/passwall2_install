@@ -251,15 +251,15 @@ ensure_cores() {
     local missing=""
     local core_log=""
 
-    section "Proxy cores"
-
     [ "$INSTALL_XRAY" = true ] && wanted="$wanted xray-core"
     [ "$INSTALL_SING_BOX" = true ] && wanted="$wanted sing-box"
 
     if [ -z "$wanted" ]; then
-        note "Skipped (--no-xray and --no-sing-box)"
+        note "Proxy cores skipped (--no-xray and --no-sing-box)"
         return 0
     fi
+
+    note "Checking proxy cores..."
 
     for core in $wanted; do
         if pkg_is_installed "$core"; then
@@ -277,7 +277,7 @@ ensure_cores() {
     pkg_update >/dev/null 2>&1 || true
 
     for core in $missing; do
-        note "Installing $core from the official OpenWrt feeds..."
+        note "Installing $core from the official OpenWrt feeds (not shipped in this release's runtime archive)..."
         core_log=$(mktemp)
         if pkg_install "$core" >/dev/null 2>"$core_log"; then
             line "$core" "installed"
@@ -440,10 +440,6 @@ for module in kmod-nft-tproxy kmod-nft-socket; do
     fi
 done
 
-if [ "$ONLY_LUCI" = false ]; then
-    ensure_cores
-fi
-
 section "Preparing"
 cd "$TEMP_DIR" || msg err "Failed to prepare temp directory"
 
@@ -578,6 +574,8 @@ if [ "$ONLY_LUCI" = false ]; then
     fi
 
     line "Runtime packages" "${RUNTIME_INSTALLED} installed"
+
+    ensure_cores
 fi
 
 note "Installing LuCI package..."
