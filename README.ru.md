@@ -1,18 +1,16 @@
-# Скрипт установки Passwall2 для OpenWrt
+# passwall2_install
 
 [English](README.md) | Русский
 
-Автоматизированный скрипт установки Passwall2 для роутеров на OpenWrt. Он устанавливает Passwall2 из официальных GitHub releases проекта [Openwrt-Passwall/openwrt-passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2), используя `opkg` или `apk` в зависимости от версии OpenWrt.
+Скрипт ставит [Passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) на роутер с OpenWrt из GitHub releases upstream-проекта. Работает и с `opkg`, и с `apk` (OpenWrt 25.x).
 
-## Быстрая установка
+## Установка
 
-Запустите эту команду на устройстве с OpenWrt:
+Запустите на роутере:
 
 ```sh
 sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)"
 ```
-
-`wget` в OpenWrt — это BusyBox/uclient-fetch, HTTPS поддерживается из коробки.
 
 Опции передаются после `--`:
 
@@ -21,47 +19,17 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
 ```
 
-Альтернативный вариант: сначала скачать скрипт, посмотреть его, потом запустить.
+> **Примечание:** начиная с релиза `26.8.27` в архиве upstream нет прокси-ядра. Скрипт ставит `xray-core` и `sing-box` из официальных фидов OpenWrt, если их нет в архиве. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash).
+
+Чтобы посмотреть скрипт перед запуском:
 
 ```sh
-cd /tmp && rm -f passwall2.sh && wget -O passwall2.sh https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh
+cd /tmp && wget -O passwall2.sh https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh
 less passwall2.sh
 sh passwall2.sh
 ```
 
-## Прокси-ядра
-
-Начиная с релиза `26.8.27` архив runtime-пакетов Passwall2 больше не содержит прокси-ядра: из него убрали `xray-core` и `sing-box`, а также отдельные ядра Hysteria2 и naive. Без ядра Passwall2 запускается, но молча не работает.
-
-Ядра из архива используются как есть. Официальные фиды OpenWrt — это только запасной вариант: после установки runtime-пакетов скрипт ставит из фидов те ядра, которых в архиве не было. Для старых релизов дополнительная загрузка не нужна. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` — например, если во flash-памяти мало места (`sing-box` занимает около 44 МБ).
-
-## Возможности
-
-- **Установка из GitHub release**: по умолчанию устанавливает последний релиз или конкретный релиз, если он указан
-- **Определение пакетного менеджера**: использует `apk` на OpenWrt 25.x и `opkg` на более старых версиях
-- **Автоматическое определение архитектуры**: скрипт сам определяет архитектуру устройства
-- **Управление зависимостями**: устанавливает необходимые пакеты, включая `dnsmasq-full`, kernel modules, `curl`, `unzip` и `jsonfilter`
-- **Резервная копия конфигурации**: сохраняет текущую конфигурацию Passwall2 перед установкой
-- **Чистая установка**: может удалить уже установленные пакеты перед переустановкой
-- **Режим только LuCI**: устанавливает только веб-интерфейс
-- **Запасная установка прокси-ядер**: ставит `xray-core` и `sing-box` из официальных фидов OpenWrt, если их нет в архиве релиза
-- **Сообщения об ошибках**: показывает детали ошибок и типовые подсказки по восстановлению
-
-## Установка
-
-Установить последний релиз:
-
-```sh
-./passwall2.sh
-```
-
-Установить конкретный релиз:
-
-```sh
-./passwall2.sh 26.6.3-1
-```
-
-## Использование
+## Опции
 
 ```text
 Usage: passwall2.sh [OPTIONS] [VER]
@@ -78,65 +46,42 @@ Examples:
   passwall2.sh                  Install latest release
   passwall2.sh 26.6.3-1         Install a specific release
   passwall2.sh -c               Clean install of latest release
+  passwall2.sh -c 26.6.3-1      Clean install of a specific release
   passwall2.sh -l               LuCI-only install
   passwall2.sh --no-sing-box    Install with xray-core only
+  passwall2.sh --no-xray        Install with sing-box only
+```
+
+Для однострочника те же аргументы передаются после `--`:
+
+```sh
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c 26.6.3-1
 ```
 
 ## Что делает скрипт
 
-1. Проверяет подключение к интернету, свободное место и базовую информацию об устройстве
-2. Определяет `apk` или `opkg` и устанавливает необходимые утилиты, включая `curl`, `unzip` и `jsonfilter`
-3. Проверяет наличие `kmod-nft-tproxy` и `kmod-nft-socket`
-4. При необходимости заменяет обычный `dnsmasq` на `dnsmasq-full`
-5. Автоматически определяет архитектуру OpenWrt
-6. Создает резервную копию `/etc/config/passwall2`, если файл существует
-7. Скачивает подходящий LuCI-пакет и архив runtime-пакетов из GitHub releases
-8. Устанавливает runtime-пакеты из архива: chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin и файлы geodata
-9. Устанавливает `xray-core` и `sing-box` из официальных фидов OpenWrt, если их не было в архиве
-10. Устанавливает LuCI-пакет Passwall2 и предупреждает, если прокси-ядра нет
-11. Удаляет временные файлы
+1. Ставит `curl`, `unzip`, `jsonfilter`, `kmod-nft-tproxy`, `kmod-nft-socket` и при необходимости заменяет `dnsmasq` на `dnsmasq-full`.
+2. Делает резервную копию `/etc/config/passwall2`, если файл есть.
+3. Скачивает LuCI-пакет и архив runtime-пакетов под архитектуру устройства.
+4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
+5. Ставит `xray-core` и `sing-box` из фидов, если их не было в архиве.
+6. Ставит LuCI-пакет и удаляет временные файлы.
 
-## После установки
-
-1. Откройте веб-интерфейс LuCI
-2. Перейдите в `Services -> Passwall2`
-3. Настройте параметры прокси
+После этого откройте LuCI и перейдите в `Services -> Passwall2`.
 
 ## Решение проблем
 
-**Недостаточно места**
+**Недостаточно места.** Запустите с `-c`, чтобы сначала удалить старые пакеты, или пропустите `sing-box` через `--no-sing-box`.
 
-Используйте `-c`, чтобы удалить уже установленные пакеты перед переустановкой:
+**Нет подходящего бинарного пакета.** Запустите с `-l`, чтобы поставить только LuCI-интерфейс.
 
-```sh
-./passwall2.sh -c
-```
-
-**Нет подходящего бинарного пакета**
-
-Используйте `-l` для установки только LuCI:
-
-```sh
-./passwall2.sh -l
-```
-
-**Passwall2 запускается, но трафик не идет через прокси**
-
-Проверьте, что прокси-ядро установлено: должен существовать `/usr/bin/xray` или `/usr/bin/sing-box`. Без ядра в логе появляется `process /tmp/etc/passwall2/acl/default.json error`. Если фиды были недоступны, установите ядро вручную:
+**Passwall2 запускается, но трафик не идет через прокси.** Нет прокси-ядра: должен существовать `/usr/bin/xray` или `/usr/bin/sing-box`. В логе видно `process /tmp/etc/passwall2/acl/default.json error`. Поставьте ядро вручную:
 
 ```sh
 apk add xray-core sing-box       # OpenWrt 25.x
-opkg install xray-core sing-box  # более старые версии
+opkg install xray-core sing-box  # старые версии
 ```
-
-**Установка завершается ошибкой**
-
-Проверьте подключение к интернету, DNS, свободное место и наличие assets для вашей архитектуры в выбранном релизе Passwall2.
 
 ## Благодарности
 
 - [Passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2): оригинальный проект команды OpenWrt Passwall
-
-## Лицензия
-
-Этот скрипт установки предоставляется как есть для личного и образовательного использования.
