@@ -5,6 +5,16 @@ PACKAGE_MANAGER=""
 PACKAGE_TYPE=""
 REPO_URL="https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall2/releases"
 BASE_DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall2/releases/download"
+FEED_BASE_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build"
+FEED_APK_LIST="/etc/apk/repositories.d/passwall.list"
+FEED_APK_KEY="/etc/apk/keys/openwrt-passwall-build.pem"
+FEED_OPKG_CONF="/etc/opkg/customfeeds.conf"
+FEED_FILE=""
+FEED_LINE=""
+FEED_URL=""
+FEED_TEMP_FILE=""
+FEED_ADDED=false
+WANTED_CORES=""
 TEMP_DIR="/tmp/passwall2_update"
 CONFIG_DIR="/etc/config"
 BACKUP_SUFFIX=$(date +%Y%m%d-%H%M%S)
@@ -30,6 +40,13 @@ else
 fi
 
 cleanup() {
+    remove_passwall_feed
+
+    if [ -n "$FEED_TEMP_FILE" ]; then
+        rm -f "$FEED_TEMP_FILE"
+        FEED_TEMP_FILE=""
+    fi
+
     if [ "$RESTORE_RESOLVER" = true ] && [ -n "$RESOLV_BACKUP" ] && [ -f "$RESOLV_BACKUP" ]; then
         cp "$RESOLV_BACKUP" /tmp/resolv.conf 2>/dev/null || true
         rm -f "$RESOLV_BACKUP"
@@ -133,6 +150,13 @@ pkg_install() {
     esac
 }
 
+pkg_upgrade_hint() {
+    case "$PACKAGE_MANAGER" in
+        apk) echo "apk update && apk add --upgrade $*" ;;
+        opkg) echo "opkg update && opkg upgrade $*" ;;
+    esac
+}
+
 pkg_install_local() {
     case "$PACKAGE_MANAGER" in
         apk) apk add --allow-untrusted --force-reinstall "$1" ;;
@@ -201,6 +225,21 @@ pkg_is_installed() {
     esac
 }
 
+pkg_installed_version() {
+    local name="$1"
+    local entry=""
+
+    case "$PACKAGE_MANAGER" in
+        apk)
+            entry=$(apk list --installed "$name" 2>/dev/null | awk 'NR==1 {print $1}')
+            echo "${entry#$name-}"
+            ;;
+        opkg)
+            opkg list-installed "$name" 2>/dev/null | awk 'NR==1 {print $3}'
+            ;;
+    esac
+}
+
 ensure_dnsmasq_full() {
     local dnsmasq_full_ipk=""
     local dnsmasq_log=""
@@ -245,45 +284,265 @@ ensure_dnsmasq_full() {
     fi
 }
 
+ensure_passwall_feed() {
+    local arch=""
+    local branch=""
+    local feed_path=""
+    local key_file=""
+    local feed_tmp=""
+    local expected=0
+    local written=0
+
+    # DISTRIB_ARCH is the OpenWrt package architecture the feed path needs; get_architecture can fall back to the CPU architecture.
+    if [ -r /etc/openwrt_release ]; then
+        arch=$(. /etc/openwrt_release; echo "$DISTRIB_ARCH")
+    fi
+    branch=$(get_release_version)
+
+    if [ -z "$branch" ] || [ -z "$arch" ]; then
+        warn "Failed to read DISTRIB_RELEASE or DISTRIB_ARCH from /etc/openwrt_release."
+        return 1
+    fi
+
+    case "$branch" in
+        *SNAPSHOT*) feed_path="snapshots/packages/$arch/passwall_packages" ;;
+        *) feed_path="releases/packages-$branch/$arch/passwall_packages" ;;
+    esac
+
+    FEED_URL="$FEED_BASE_URL/$feed_path"
+
+    case "$PACKAGE_MANAGER" in
+        apk)
+            FEED_FILE="$FEED_APK_LIST"
+            FEED_LINE="$FEED_URL/packages.adb"
+
+            if [ -f "$FEED_FILE" ] && grep -qF "$FEED_LINE" "$FEED_FILE"; then
+                line "Passwall feed" "$FEED_FILE (already configured)"
+                return 0
+            fi
+
+            if [ ! -s "$FEED_APK_KEY" ]; then
+                note "Downloading the passwall build signing key..."
+                key_file="$TEMP_DIR/passwall-build-apk.pub"
+                if ! curl -L -s --fail -o "$key_file" "$FEED_BASE_URL/apk.pub"; then
+                    rm -f "$key_file"
+                    warn "Failed to download the passwall build signing key."
+                    return 1
+                fi
+
+                if ! grep -q 'BEGIN PUBLIC KEY' "$key_file"; then
+                    rm -f "$key_file"
+                    warn "The downloaded passwall build signing key is not a public key in PEM format."
+                    return 1
+                fi
+
+                mkdir -p /etc/apk/keys || return 1
+                if ! cp "$key_file" "$FEED_APK_KEY" || ! grep -q 'END PUBLIC KEY' "$FEED_APK_KEY"; then
+                    rm -f "$FEED_APK_KEY" "$key_file"
+                    warn "Failed to install the passwall build signing key into $FEED_APK_KEY."
+                    return 1
+                fi
+                rm -f "$key_file"
+            fi
+
+            mkdir -p /etc/apk/repositories.d || return 1
+            if ! echo "$FEED_LINE" > "$FEED_FILE" || ! grep -qF "$FEED_LINE" "$FEED_FILE"; then
+                rm -f "$FEED_FILE"
+                warn "Failed to write $FEED_FILE."
+                return 1
+            fi
+            ;;
+        opkg)
+            FEED_FILE="$FEED_OPKG_CONF"
+            FEED_LINE="src/gz passwall_packages $FEED_URL"
+
+            if [ -f "$FEED_FILE" ] && grep -qF "$FEED_LINE" "$FEED_FILE"; then
+                line "Passwall feed" "$FEED_FILE (already configured)"
+                return 0
+            fi
+
+            note "Downloading the passwall build signing key..."
+            key_file="$TEMP_DIR/passwall-build-ipk.pub"
+            if ! curl -L -s --fail -o "$key_file" "$FEED_BASE_URL/ipk.pub"; then
+                rm -f "$key_file"
+                warn "Failed to download the passwall build signing key."
+                return 1
+            fi
+
+            if ! opkg-key add "$key_file" >/dev/null 2>&1; then
+                rm -f "$key_file"
+                warn "Failed to add the passwall build signing key with opkg-key."
+                return 1
+            fi
+            rm -f "$key_file"
+
+            if [ -f "$FEED_FILE" ] && grep -q "passwall_packages" "$FEED_FILE"; then
+                note "Replacing an outdated passwall feed line in $FEED_FILE"
+            fi
+
+            feed_tmp="$FEED_FILE.passwall2.$$"
+            FEED_TEMP_FILE="$feed_tmp"
+            if ! touch "$feed_tmp" 2>/dev/null; then
+                FEED_TEMP_FILE=""
+                warn "Failed to write $FEED_FILE. The existing feed configuration was left unchanged."
+                return 1
+            fi
+
+            expected=$(grep -cv "passwall_packages" "$FEED_FILE" 2>/dev/null)
+            expected=$(( ${expected:-0} + 1 ))
+            {
+                grep -v "passwall_packages" "$FEED_FILE" 2>/dev/null
+                echo "$FEED_LINE"
+            } > "$feed_tmp" 2>/dev/null
+            written=$(wc -l < "$feed_tmp" 2>/dev/null)
+
+            if [ "${written:-0}" -ne "$expected" ] ||
+               ! grep -qF "$FEED_LINE" "$feed_tmp" 2>/dev/null || ! mv "$feed_tmp" "$FEED_FILE"; then
+                rm -f "$feed_tmp"
+                FEED_TEMP_FILE=""
+                warn "Failed to write $FEED_FILE. The existing feed configuration was left unchanged."
+                return 1
+            fi
+            FEED_TEMP_FILE=""
+            ;;
+    esac
+
+    FEED_ADDED=true
+    line "Passwall feed" "$FEED_FILE"
+    return 0
+}
+
+remove_passwall_feed() {
+    local temp_conf=""
+    local status=0
+    local expected=0
+    local written=0
+
+    [ "$FEED_ADDED" = true ] || return 0
+    FEED_ADDED=false
+
+    case "$PACKAGE_MANAGER" in
+        apk)
+            rm -f "$FEED_FILE"
+            ;;
+        opkg)
+            [ -f "$FEED_FILE" ] || return 0
+            [ -n "$FEED_LINE" ] || return 0
+
+            temp_conf="$FEED_FILE.passwall2.$$"
+            FEED_TEMP_FILE="$temp_conf"
+            if touch "$temp_conf" 2>/dev/null; then
+                expected=$(grep -cvF "$FEED_LINE" "$FEED_FILE" 2>/dev/null)
+                grep -vF "$FEED_LINE" "$FEED_FILE" > "$temp_conf" 2>/dev/null
+                status=$?
+                written=$(wc -l < "$temp_conf" 2>/dev/null)
+
+                if { [ "$status" -eq 0 ] || [ "$status" -eq 1 ]; } &&
+                   [ "${written:-0}" -eq "${expected:-0}" ] && mv "$temp_conf" "$FEED_FILE"; then
+                    FEED_TEMP_FILE=""
+                    return 0
+                fi
+            fi
+
+            rm -f "$temp_conf"
+            FEED_TEMP_FILE=""
+            warn "Failed to edit $FEED_FILE. Remove this feed line by hand: $FEED_LINE"
+            ;;
+    esac
+}
+
+passwall_feed_present() {
+    case "$PACKAGE_MANAGER" in
+        apk) [ -s "$FEED_APK_LIST" ] ;;
+        opkg) [ -f "$FEED_OPKG_CONF" ] && grep -q "passwall_packages" "$FEED_OPKG_CONF" ;;
+        *) return 1 ;;
+    esac
+}
+
+feed_named_in_errors() {
+    local log_file="$1"
+    local needle="$FEED_URL"
+
+    [ -s "$log_file" ] || return 1
+    [ -n "$needle" ] || needle="$FEED_BASE_URL"
+
+    grep -iE "(error|warning|fail|denied|refused|not found|unavailable|unable)" "$log_file" 2>/dev/null |
+        grep -qF "$needle"
+}
+
 ensure_cores() {
     local core=""
-    local wanted=""
-    local missing=""
+    local before=""
+    local after=""
     local core_log=""
+    local update_log=""
+    local update_ok=true
+    local feed_hint=""
 
-    [ "$INSTALL_XRAY" = true ] && wanted="$wanted xray-core"
-    [ "$INSTALL_SING_BOX" = true ] && wanted="$wanted sing-box"
+    WANTED_CORES=""
+    [ "$INSTALL_XRAY" = true ] && WANTED_CORES="$WANTED_CORES xray-core"
+    [ "$INSTALL_SING_BOX" = true ] && WANTED_CORES="$WANTED_CORES sing-box"
 
-    if [ -z "$wanted" ]; then
+    if [ -z "$WANTED_CORES" ]; then
         note "Proxy cores skipped (--no-xray and --no-sing-box)"
         return 0
     fi
 
     note "Checking proxy cores..."
+    ensure_direct_resolver
 
-    for core in $wanted; do
-        if pkg_is_installed "$core"; then
-            line "$core" "already installed"
-        else
-            missing="$missing $core"
+    if [ "$USE_FEED" = true ]; then
+        if ! ensure_passwall_feed; then
+            remove_passwall_feed
+            warn "The passwall build feed was not configured. The proxy cores will come from the official OpenWrt feeds and may be several months old."
         fi
-    done
-
-    if [ -z "$missing" ]; then
-        return 0
+    else
+        note "Passwall build feed skipped (--no-feed)"
     fi
 
-    ensure_direct_resolver
-    pkg_update >/dev/null 2>&1 || true
+    update_log=$(mktemp)
+    pkg_update >"$update_log" 2>&1 || update_ok=false
 
-    for core in $missing; do
-        note "Installing $core from the official OpenWrt feeds (not shipped in this release's runtime archive)..."
+    if feed_named_in_errors "$update_log"; then
+        print_error_log "$update_log"
+        if [ "$FEED_ADDED" = true ]; then
+            remove_passwall_feed
+            warn "Failed to read the passwall build feed. The feed was removed. The proxy cores will come from the official OpenWrt feeds and may be several months old."
+            pkg_update >/dev/null 2>&1 || true
+        else
+            feed_hint="$FEED_FILE"
+            if [ -z "$feed_hint" ]; then
+                case "$PACKAGE_MANAGER" in
+                    apk) feed_hint="$FEED_APK_LIST" ;;
+                    opkg) feed_hint="$FEED_OPKG_CONF" ;;
+                esac
+            fi
+            warn "The passwall build feed configured in $feed_hint is unreachable and is the likely cause. Remove that feed line or run this script again later. The proxy cores may be installed from a stale index."
+        fi
+    else
+        FEED_ADDED=false
+        if [ "$update_ok" = false ]; then
+            print_error_log "$update_log"
+            warn "Failed to refresh the package lists. The proxy cores may be installed from a stale index."
+        fi
+    fi
+    rm -f "$update_log"
+
+    for core in $WANTED_CORES; do
+        before=$(pkg_installed_version "$core")
         core_log=$(mktemp)
         if pkg_install "$core" >/dev/null 2>"$core_log"; then
-            line "$core" "installed"
+            after=$(pkg_installed_version "$core")
+            if [ -z "$before" ]; then
+                line "$core" "installed${after:+ $after}"
+            elif [ "$before" != "$after" ]; then
+                line "$core" "upgraded $before -> $after"
+            else
+                line "$core" "already current${before:+ ($before)}"
+            fi
         else
             print_error_log "$core_log"
-            warn "Failed to install $core from the official feeds. Install a core manually if Passwall2 has none."
+            warn "Failed to install $core. Install a core manually if Passwall2 has none."
         fi
         rm -f "$core_log"
     done
@@ -347,7 +606,11 @@ show_help() {
     echo "  Install Passwall2 from GitHub releases."
     echo "  Automatically uses apk or opkg, depending on availability."
     echo "  Upstream releases no longer ship a proxy core, so xray-core and"
-    echo "  sing-box are installed from the official OpenWrt feeds."
+    echo "  sing-box are installed from the passwall build feed, which is"
+    echo "  much newer than the official OpenWrt feeds. The feed stays"
+    echo "  configured ($FEED_APK_LIST for apk,"
+    echo "  $FEED_OPKG_CONF for opkg), so the cores can be"
+    echo "  updated later without this script."
     echo ""
     echo "Options:"
     echo "  [VER]               Optional release version (e.g., 26.6.3-1)."
@@ -355,6 +618,8 @@ show_help() {
     echo "  -l, --only-luci     Install only LuCI interface (skip binaries)."
     echo "      --no-xray       Do not install xray-core."
     echo "      --no-sing-box   Do not install sing-box (~44 MB on flash)."
+    echo "      --no-feed       Do not add the passwall build feed; install the"
+    echo "                      cores from the feeds the router already has."
     echo "  -h, --help          Show this help message."
     echo ""
     echo "Examples:"
@@ -363,6 +628,7 @@ show_help() {
     echo "  $SCRIPT_NAME -c               Clean install of latest release"
     echo "  $SCRIPT_NAME -l               Install only LuCI package"
     echo "  $SCRIPT_NAME --no-sing-box    Install latest release with xray-core only"
+    echo "  $SCRIPT_NAME --no-feed        Install the cores from the existing feeds"
     echo ""
     exit 0
 }
@@ -372,6 +638,7 @@ CLEAN_INSTALL=false
 ONLY_LUCI=false
 INSTALL_XRAY=true
 INSTALL_SING_BOX=true
+USE_FEED=true
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -380,6 +647,7 @@ while [ "$#" -gt 0 ]; do
         -l|--only-luci) ONLY_LUCI=true; shift ;;
         --no-xray) INSTALL_XRAY=false; shift ;;
         --no-sing-box) INSTALL_SING_BOX=false; shift ;;
+        --no-feed) USE_FEED=false; shift ;;
         -*) msg err "Unknown option: $1" ;;
         *)
             if [ -n "$TARGET_VERSION" ]; then
@@ -603,5 +871,10 @@ for backup_file in $BACKUP_FILES; do
     line "Config backup" "$backup_file"
 done
 note "Open LuCI and go to Services -> Passwall2."
+
+if [ "$ONLY_LUCI" = false ] && [ -n "$WANTED_CORES" ] && passwall_feed_present; then
+    note "Update the proxy cores later: $(pkg_upgrade_hint $WANTED_CORES)"
+    note "A bare '$PACKAGE_MANAGER upgrade' is not recommended on OpenWrt; upgrade only the packages you need."
+fi
 
 exit 0

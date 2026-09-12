@@ -19,7 +19,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
 ```
 
-> **Примечание:** начиная с релиза `26.8.27` в архиве upstream нет прокси-ядра. Скрипт ставит `xray-core` и `sing-box` из официальных фидов OpenWrt, если их нет в архиве. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash).
+> **Примечание:** начиная с релиза `26.8.27` в архиве upstream нет прокси-ядра. Скрипт ставит `xray-core` и `sing-box` из [фида сборок passwall](https://github.com/moetayuko/openwrt-passwall-build) — там они заметно новее, чем в официальных фидах OpenWrt. Фид остается прописанным (`/etc/apk/repositories.d/passwall.list` для `apk`, `/etc/opkg/customfeeds.conf` для `opkg`), поэтому ядра можно обновлять и позже. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash), а `--no-feed` оставляет только те фиды, которые уже есть на роутере.
 
 Чтобы посмотреть скрипт перед запуском:
 
@@ -40,6 +40,7 @@ Options:
   -l, --only-luci     Install only LuCI interface (skip binaries)
       --no-xray       Do not install xray-core
       --no-sing-box   Do not install sing-box (~44 MB on flash)
+      --no-feed       Do not add the passwall build feed
   -h, --help          Show help message
 
 Examples:
@@ -50,6 +51,7 @@ Examples:
   passwall2.sh -l               LuCI-only install
   passwall2.sh --no-sing-box    Install with xray-core only
   passwall2.sh --no-xray        Install with sing-box only
+  passwall2.sh --no-feed        Install the cores from the existing feeds
 ```
 
 Для однострочника те же аргументы передаются после `--`:
@@ -64,10 +66,19 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 2. Делает резервную копию `/etc/config/passwall2`, если файл есть.
 3. Скачивает LuCI-пакет и архив runtime-пакетов под архитектуру устройства.
 4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
-5. Ставит `xray-core` и `sing-box` из фидов, если их не было в архиве.
+5. Прописывает фид сборок passwall и ставит или обновляет из него `xray-core` и `sing-box`. Если фид не удалось добавить или прочитать, строка фида удаляется, а ядра ставятся из официальных фидов OpenWrt.
 6. Ставит LuCI-пакет и удаляет временные файлы.
 
 После этого откройте LuCI и перейдите в `Services -> Passwall2`.
+
+Фид остается прописанным, поэтому ядра можно обновлять без этого скрипта:
+
+```sh
+apk update && apk add --upgrade xray-core sing-box   # OpenWrt 25.x
+opkg update && opkg upgrade xray-core sing-box       # старые версии
+```
+
+Обновляйте только эти пакеты. Полное обновление командой `apk upgrade` или `opkg upgrade` на OpenWrt не рекомендуется.
 
 ## Решение проблем
 
