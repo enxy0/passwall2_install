@@ -559,6 +559,24 @@ pkg_print_architectures() {
     esac
 }
 
+find_runtime_archive() {
+    local asset_names="$1"
+    local arch
+    local candidate
+
+    # 26.9.12 renamed the archive from passwall_packages_<type>_<arch>.zip to packages_<type>_<arch>.zip
+    for arch in $(pkg_print_architectures); do
+        for candidate in "packages_${PACKAGE_TYPE}_${arch}.zip" "passwall_packages_${PACKAGE_TYPE}_${arch}.zip"; do
+            if echo "$asset_names" | grep -q "^${candidate}$"; then
+                echo "$candidate"
+                return 0
+            fi
+        done
+    done
+
+    return 1
+}
+
 get_local_package_name() {
     local file="$1"
 
@@ -751,21 +769,13 @@ esac
 ZIP_FILENAME=""
 
 if [ "$ONLY_LUCI" = false ]; then
-    SUPPORTED_ARCHS=$(pkg_print_architectures)
-
-    for arch in $SUPPORTED_ARCHS; do
-        CANDIDATE_NAME="passwall_packages_${PACKAGE_TYPE}_${arch}.zip"
-
-        if echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name' | grep -q "^${CANDIDATE_NAME}$"; then
-            ZIP_FILENAME="$CANDIDATE_NAME"
-            break
-        fi
-    done
+    ASSET_NAMES=$(echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name')
+    ZIP_FILENAME=$(find_runtime_archive "$ASSET_NAMES")
 
     if [ -z "$ZIP_FILENAME" ]; then
         warn "This release does not include a runtime archive for $ARCH."
         note "Available archives:"
-        echo "$API_RESPONSE" | jsonfilter -e '@.assets[*].name' | grep ".zip" | sed 's/^/    /'
+        echo "$ASSET_NAMES" | grep ".zip" | sed 's/^/    /'
         msg err "No compatible binary package found. Use --only-luci for a LuCI-only install"
     fi
 else
