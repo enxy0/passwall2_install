@@ -24,6 +24,8 @@ RESTORE_RESOLVER=false
 BACKUP_FILES=""
 RUNTIME_INSTALLED=0
 RUNTIME_FAILED=0
+PASSWALL_SERVICES="passwall2 passwall2_server"
+RUNNING_SERVICES=""
 
 if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
     C_RESET=$(printf '\033[0m')
@@ -617,6 +619,63 @@ get_release_version() {
     fi
 }
 
+service_is_running() {
+    local pattern="$1"
+
+    if command_exists pgrep; then
+        pgrep -f "$pattern" >/dev/null 2>&1
+    else
+        grep -qF "$pattern" /proc/[0-9]*/cmdline 2>/dev/null
+    fi
+}
+
+record_running_services() {
+    local name=""
+
+    RUNNING_SERVICES=""
+    [ "$RESTART_SERVICES" = true ] || return 0
+
+    for name in $PASSWALL_SERVICES; do
+        if service_is_running "$name/bin/"; then
+            RUNNING_SERVICES="$RUNNING_SERVICES $name"
+        fi
+    done
+}
+
+# The package postinst runs '<init> start', not '<init> restart', and start() does not
+# stop a running instance, so an install over a running service leaves two of them.
+restart_running_services() {
+    local name=""
+    local init_script=""
+
+    if [ "$RESTART_SERVICES" != true ]; then
+        note "Service restart skipped (--no-restart)"
+        return 0
+    fi
+
+    for name in $PASSWALL_SERVICES; do
+        case " $RUNNING_SERVICES " in
+            *" $name "*) ;;
+            *)
+                note "$name was not running before the install; left stopped"
+                continue
+                ;;
+        esac
+
+        init_script="/etc/init.d/$name"
+        if [ ! -x "$init_script" ]; then
+            note "$init_script is missing or not executable; restart skipped"
+            continue
+        fi
+
+        if "$init_script" restart >/dev/null 2>&1; then
+            line "$name" "restarted"
+        else
+            warn "Failed to restart $name. Restart it by hand: $init_script restart"
+        fi
+    done
+}
+
 show_help() {
     echo "Usage: $SCRIPT_NAME [OPTIONS] [VER]"
     echo ""
@@ -638,6 +697,8 @@ show_help() {
     echo "      --no-sing-box   Do not install sing-box (~44 MB on flash)."
     echo "      --no-feed       Do not add the passwall build feed; install the"
     echo "                      cores from the feeds the router already has."
+    echo "      --no-restart    Do not restart the Passwall2 services that were"
+    echo "                      running before the install."
     echo "  -h, --help          Show this help message."
     echo ""
     echo "Examples:"
@@ -657,6 +718,7 @@ ONLY_LUCI=false
 INSTALL_XRAY=true
 INSTALL_SING_BOX=true
 USE_FEED=true
+RESTART_SERVICES=true
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -666,6 +728,7 @@ while [ "$#" -gt 0 ]; do
         --no-xray) INSTALL_XRAY=false; shift ;;
         --no-sing-box) INSTALL_SING_BOX=false; shift ;;
         --no-feed) USE_FEED=false; shift ;;
+        --no-restart) RESTART_SERVICES=false; shift ;;
         -*) msg err "Unknown option: $1" ;;
         *)
             if [ -n "$TARGET_VERSION" ]; then
@@ -728,6 +791,8 @@ done
 
 section "Preparing"
 cd "$TEMP_DIR" || msg err "Failed to prepare temp directory"
+
+record_running_services
 
 for config_file in "$CONFIG_DIR"/passwall2*; do
     [ -f "$config_file" ] || continue
@@ -867,6 +932,8 @@ else
     rm -f "$ERROR_LOG"
     msg err "Failed to install LuCI package"
 fi
+
+restart_running_services
 
 if [ ! -e /usr/bin/xray ] && [ ! -e /usr/bin/sing-box ]; then
     warn "No proxy core is installed. Passwall2 will not start without xray-core or sing-box."

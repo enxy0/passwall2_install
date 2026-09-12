@@ -41,6 +41,7 @@ Options:
       --no-xray       Do not install xray-core
       --no-sing-box   Do not install sing-box (~44 MB on flash)
       --no-feed       Do not add the passwall build feed
+      --no-restart    Do not restart the Passwall2 services after the install
   -h, --help          Show help message
 
 Examples:
@@ -68,6 +69,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
 5. Прописывает фид сборок passwall и ставит или обновляет из него `xray-core` и `sing-box`. Если фид не удалось добавить или прочитать, строка фида удаляется, а ядра ставятся из официальных фидов OpenWrt.
 6. Ставит LuCI-пакет и удаляет временные файлы.
+7. Перезапускает службы Passwall2, которые работали до установки. Пакет запускается командой `start`, а не `restart`, из-за чего остается второй процесс прокси. Остановленная служба остается остановленной. Шаг пропускается через `--no-restart`.
 
 После этого откройте LuCI и перейдите в `Services -> Passwall2`.
 

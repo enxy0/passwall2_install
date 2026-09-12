@@ -41,6 +41,7 @@ Options:
       --no-xray       Do not install xray-core
       --no-sing-box   Do not install sing-box (~44 MB on flash)
       --no-feed       Do not add the passwall build feed
+      --no-restart    Do not restart the Passwall2 services after the install
   -h, --help          Show help message
 
 Examples:
@@ -68,6 +69,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 4. Installs the runtime packages from the archive (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
 5. Adds the passwall build feed and installs or upgrades `xray-core` and `sing-box` from it. If the feed cannot be added or read, the feed line is removed again and the cores come from the official OpenWrt feeds.
 6. Installs the LuCI package and cleans up.
+7. Restarts the Passwall2 services that were running before the install. The package installs itself with `start`, not `restart`, which would leave a second proxy process. A service that was stopped stays stopped. `--no-restart` skips this step.
 
 Then open LuCI and go to `Services -> Passwall2`.
 
