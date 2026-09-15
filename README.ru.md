@@ -4,7 +4,7 @@
 
 Скрипт ставит [Passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) на роутер с OpenWrt из GitHub releases upstream-проекта. Работает и с `opkg`, и с `apk` (OpenWrt 25.x).
 
-## Установка
+## Быстрая установка
 
 Запустите на роутере:
 
@@ -12,12 +12,7 @@
 sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)"
 ```
 
-Опции передаются после `--`:
-
-```sh
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
-```
+Это вся установка. Чтобы изменить состав пакетов, смотрите [Опции](#опции).
 
 > **Примечание:** начиная с релиза `26.8.27` в архиве upstream нет прокси-ядра. Скрипт ставит `xray-core` и `sing-box` из [фида сборок passwall](https://github.com/moetayuko/openwrt-passwall-build) — там они заметно новее, чем в официальных фидах OpenWrt. Фид остается прописанным (`/etc/apk/repositories.d/passwall.list` для `apk`, `/etc/opkg/customfeeds.conf` для `opkg`), поэтому ядра можно обновлять и позже. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash), а `--no-feed` оставляет только те фиды, которые уже есть на роутере.
 
@@ -30,6 +25,16 @@ sh passwall2.sh
 ```
 
 ## Опции
+
+Опции передаются после `--`. Каждая строка ниже заменяет команду выше — запустите одну из них, а не обе.
+
+```sh
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c 26.6.3-1
+```
+
+Полный список:
 
 ```text
 Usage: passwall2.sh [OPTIONS] [VER]
@@ -53,12 +58,6 @@ Examples:
   passwall2.sh --no-sing-box    Install with xray-core only
   passwall2.sh --no-xray        Install with sing-box only
   passwall2.sh --no-feed        Install the cores from the existing feeds
-```
-
-Для однострочника те же аргументы передаются после `--`:
-
-```sh
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c 26.6.3-1
 ```
 
 ## Что делает скрипт

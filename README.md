@@ -4,7 +4,7 @@ English | [Русский](README.ru.md)
 
 Shell script that installs [Passwall2](https://github.com/Openwrt-Passwall/openwrt-passwall2) on an OpenWrt router from the upstream GitHub releases. Works with both `opkg` and `apk` (OpenWrt 25.x).
 
-## Install
+## Quick install
 
 Run on the router:
 
@@ -12,12 +12,7 @@ Run on the router:
 sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)"
 ```
 
-Options go after `--`:
-
-```sh
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
-```
+That is the whole install. See [Options](#options) to change what it installs.
 
 > **Note:** since release `26.8.27` the upstream archive ships no proxy core. The script installs `xray-core` and `sing-box` from the [passwall build feed](https://github.com/moetayuko/openwrt-passwall-build), where they are much newer than in the official OpenWrt feeds. The feed stays configured (`/etc/apk/repositories.d/passwall.list` for `apk`, `/etc/opkg/customfeeds.conf` for `opkg`), so the cores can be updated later. Use `--no-xray` or `--no-sing-box` to skip one (`sing-box` takes about 44 MB of flash), or `--no-feed` to keep the existing feeds.
 
@@ -30,6 +25,16 @@ sh passwall2.sh
 ```
 
 ## Options
+
+Options go after `--`. Each line below replaces the command above — run one of them, not both.
+
+```sh
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- 26.9.2-1
+sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c 26.6.3-1
+```
+
+Full list:
 
 ```text
 Usage: passwall2.sh [OPTIONS] [VER]
@@ -53,12 +58,6 @@ Examples:
   passwall2.sh --no-sing-box    Install with xray-core only
   passwall2.sh --no-xray        Install with sing-box only
   passwall2.sh --no-feed        Install the cores from the existing feeds
-```
-
-With the one-liner, put the same arguments after `--`:
-
-```sh
-sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/main/passwall2.sh)" -- -c 26.6.3-1
 ```
 
 ## What the script does
