@@ -809,11 +809,10 @@ cd "$TEMP_DIR" || msg err "Failed to prepare temp directory"
 
 record_running_services
 
-for config_file in "$CONFIG_DIR"/passwall2*; do
+# Only the package's own UCI files: a glob also catches earlier backups,
+# '*.apk-new' copies and notes that happen to start with 'passwall2'.
+for config_file in "$CONFIG_DIR/passwall2" "$CONFIG_DIR/passwall2_server"; do
     [ -f "$config_file" ] || continue
-    case "$config_file" in
-        *.bak*) continue ;;
-    esac
     BACKUP_FILE="$config_file-$BACKUP_SUFFIX.bak"
     cp "$config_file" "$BACKUP_FILE"
     BACKUP_FILES="$BACKUP_FILES $BACKUP_FILE"

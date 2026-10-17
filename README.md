@@ -63,7 +63,7 @@ Examples:
 ## What the script does
 
 1. Installs `curl`, `unzip`, `jsonfilter`, `kmod-nft-tproxy`, `kmod-nft-socket`, and replaces `dnsmasq` with `dnsmasq-full` if needed.
-2. Backs up `/etc/config/passwall2` if it exists.
+2. Backs up `/etc/config/passwall2` and `/etc/config/passwall2_server` if they exist.
 3. Downloads the LuCI package and the runtime archive for the detected architecture.
 4. Installs the runtime packages from the archive (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
 5. Adds the passwall build feed and installs or upgrades `xray-core` and `sing-box` from it. If the feed cannot be added or read, the feed line is removed again and the cores come from the official OpenWrt feeds.

@@ -63,7 +63,7 @@ Examples:
 ## Что делает скрипт
 
 1. Ставит `curl`, `unzip`, `jsonfilter`, `kmod-nft-tproxy`, `kmod-nft-socket` и при необходимости заменяет `dnsmasq` на `dnsmasq-full`.
-2. Делает резервную копию `/etc/config/passwall2`, если файл есть.
+2. Делает резервные копии `/etc/config/passwall2` и `/etc/config/passwall2_server`, если файлы есть.
 3. Скачивает LuCI-пакет и архив runtime-пакетов под архитектуру устройства.
 4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
 5. Прописывает фид сборок passwall и ставит или обновляет из него `xray-core` и `sing-box`. Если фид не удалось добавить или прочитать, строка фида удаляется, а ядра ставятся из официальных фидов OpenWrt.
