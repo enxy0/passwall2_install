@@ -217,7 +217,21 @@ ensure_command() {
 
     [ -x "$path" ] && return 0
     note "Installing required tool: $package"
-    pkg_update && pkg_install "$package" || msg err "Failed to install $package"
+    pkg_install "$package" || msg err "Failed to install $package"
+}
+
+# Package lists live in tmpfs and are gone after a reboot. Without them the runtime
+# packages cannot resolve dependencies from the official feeds (libev, libsodium, libudns).
+refresh_package_lists() {
+    local update_log=""
+
+    note "Updating package lists..."
+    update_log=$(mktemp)
+    if ! pkg_update >"$update_log" 2>&1; then
+        print_error_log "$update_log"
+        warn "Failed to refresh the package lists. Dependencies from the official feeds may not be found."
+    fi
+    rm -f "$update_log"
 }
 
 pkg_is_installed() {
@@ -753,6 +767,7 @@ else
 fi
 
 ensure_direct_resolver
+refresh_package_lists
 
 ensure_command /usr/bin/unzip unzip
 ensure_command /usr/bin/curl curl
