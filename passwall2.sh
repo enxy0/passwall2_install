@@ -486,6 +486,16 @@ feed_named_in_errors() {
         grep -qF "$needle"
 }
 
+# The runtime archive may ship the proxy cores again (26.11.11 has xray-core and sing-box),
+# so --no-xray and --no-sing-box must also apply to the archive packages.
+is_skipped_core() {
+    case "$1" in
+        xray-core) [ "$INSTALL_XRAY" = false ] ;;
+        sing-box) [ "$INSTALL_SING_BOX" = false ] ;;
+        *) return 1 ;;
+    esac
+}
+
 ensure_cores() {
     local core=""
     local before=""
@@ -897,6 +907,7 @@ if [ "$CLEAN_INSTALL" = true ]; then
             [ -f "$pkg_file" ] || continue
             [ "$pkg_file" = "$LUCI_FILENAME" ] && continue
             pkg_name=$(get_local_package_name "$pkg_file")
+            is_skipped_core "$pkg_name" && continue
             if [ "$pkg_name" != "libc" ] && [ "$pkg_name" != "kernel" ]; then
                 [ "$pkg_name" = "simple-obfs-client" ] && pkg_remove_force simple-obfs >/dev/null 2>&1
                 pkg_remove_force "$pkg_name" >/dev/null 2>&1
@@ -913,6 +924,10 @@ if [ "$ONLY_LUCI" = false ]; then
     for pkg_file in *."$PACKAGE_TYPE"; do
         [ -f "$pkg_file" ] || continue
         [ "$pkg_file" = "$LUCI_FILENAME" ] && continue
+        if is_skipped_core "$(get_local_package_name "$pkg_file")"; then
+            rm -f "$pkg_file"
+            continue
+        fi
 
         ERROR_LOG=$(mktemp)
         if pkg_install_local "$pkg_file" >/dev/null 2>"$ERROR_LOG"; then

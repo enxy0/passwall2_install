@@ -14,7 +14,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 
 Это вся установка. Чтобы изменить состав пакетов, смотрите [Опции](#опции).
 
-> **Примечание:** начиная с релиза `26.8.27` в архиве upstream нет прокси-ядра. Скрипт ставит `xray-core` и `sing-box` из [фида сборок passwall](https://github.com/moetayuko/openwrt-passwall-build) — там они заметно новее, чем в официальных фидах OpenWrt. Фид остается прописанным (`/etc/apk/repositories.d/passwall.list` для `apk`, `/etc/opkg/customfeeds.conf` для `opkg`), поэтому ядра можно обновлять и позже. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash), а `--no-feed` оставляет только те фиды, которые уже есть на роутере.
+> **Примечание:** в архиве upstream прокси-ядра есть не всегда (в `26.8.27` их не было, в `26.11.11` снова есть). Скрипт ставит `xray-core` и `sing-box` из [фида сборок passwall](https://github.com/moetayuko/openwrt-passwall-build) — там они заметно новее, чем в официальных фидах OpenWrt. Фид остается прописанным (`/etc/apk/repositories.d/passwall.list` для `apk`, `/etc/opkg/customfeeds.conf` для `opkg`), поэтому ядра можно обновлять и позже. Чтобы пропустить ядро, используйте `--no-xray` или `--no-sing-box` (`sing-box` занимает около 44 МБ flash), а `--no-feed` оставляет только те фиды, которые уже есть на роутере.
 
 Чтобы посмотреть скрипт перед запуском:
 
@@ -65,7 +65,7 @@ Examples:
 1. Ставит `curl`, `unzip`, `jsonfilter`, `kmod-nft-tproxy`, `kmod-nft-socket` и при необходимости заменяет `dnsmasq` на `dnsmasq-full`.
 2. Делает резервные копии `/etc/config/passwall2` и `/etc/config/passwall2_server`, если файлы есть.
 3. Скачивает LuCI-пакет и архив runtime-пакетов под архитектуру устройства.
-4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
+4. Ставит runtime-пакеты из архива (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata). Если в архиве есть ядра, `--no-xray` и `--no-sing-box` пропускают и их.
 5. Прописывает фид сборок passwall и ставит или обновляет из него `xray-core` и `sing-box`. Если фид не удалось добавить или прочитать, строка фида удаляется, а ядра ставятся из официальных фидов OpenWrt.
 6. Ставит LuCI-пакет и удаляет временные файлы.
 7. Перезапускает службы Passwall2, которые работали до установки. Пакет запускается командой `start`, а не `restart`, из-за чего остается второй процесс прокси. Остановленная служба остается остановленной. Шаг пропускается через `--no-restart`.

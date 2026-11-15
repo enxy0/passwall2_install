@@ -14,7 +14,7 @@ sh -c "$(wget -qO- https://raw.githubusercontent.com/enxy0/passwall2_install/mai
 
 That is the whole install. See [Options](#options) to change what it installs.
 
-> **Note:** since release `26.8.27` the upstream archive ships no proxy core. The script installs `xray-core` and `sing-box` from the [passwall build feed](https://github.com/moetayuko/openwrt-passwall-build), where they are much newer than in the official OpenWrt feeds. The feed stays configured (`/etc/apk/repositories.d/passwall.list` for `apk`, `/etc/opkg/customfeeds.conf` for `opkg`), so the cores can be updated later. Use `--no-xray` or `--no-sing-box` to skip one (`sing-box` takes about 44 MB of flash), or `--no-feed` to keep the existing feeds.
+> **Note:** the upstream archive does not always ship the proxy cores (`26.8.27` had none, `26.11.11` has them again). The script installs `xray-core` and `sing-box` from the [passwall build feed](https://github.com/moetayuko/openwrt-passwall-build), where they are much newer than in the official OpenWrt feeds. The feed stays configured (`/etc/apk/repositories.d/passwall.list` for `apk`, `/etc/opkg/customfeeds.conf` for `opkg`), so the cores can be updated later. Use `--no-xray` or `--no-sing-box` to skip one (`sing-box` takes about 44 MB of flash), or `--no-feed` to keep the existing feeds.
 
 To read the script before running it:
 
@@ -65,7 +65,7 @@ Examples:
 1. Installs `curl`, `unzip`, `jsonfilter`, `kmod-nft-tproxy`, `kmod-nft-socket`, and replaces `dnsmasq` with `dnsmasq-full` if needed.
 2. Backs up `/etc/config/passwall2` and `/etc/config/passwall2_server` if they exist.
 3. Downloads the LuCI package and the runtime archive for the detected architecture.
-4. Installs the runtime packages from the archive (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata).
+4. Installs the runtime packages from the archive (chinadns-ng, shadowsocks-rust, simple-obfs, v2ray-plugin, geodata). When the archive includes the cores, `--no-xray` and `--no-sing-box` skip them too.
 5. Adds the passwall build feed and installs or upgrades `xray-core` and `sing-box` from it. If the feed cannot be added or read, the feed line is removed again and the cores come from the official OpenWrt feeds.
 6. Installs the LuCI package and cleans up.
 7. Restarts the Passwall2 services that were running before the install. The package installs itself with `start`, not `restart`, which would leave a second proxy process. A service that was stopped stays stopped. `--no-restart` skips this step.
